@@ -20,3 +20,9 @@ web/
 *.swp
 *.swo
 *~
+
+# System packages
+*.deb
+
+# Claude
+.claude/
