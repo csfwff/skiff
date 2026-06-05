@@ -1,0 +1,22 @@
+# Flutter
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+
+# Platform build artifacts
+android/
+ios/
+web/
+
+# Release tarball
+*.tar.gz
+
+# Misc
+.DS_Store
+*.swp
+*.swo
+*~
