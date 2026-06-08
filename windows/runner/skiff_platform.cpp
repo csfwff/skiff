@@ -11,7 +11,10 @@ constexpr char kChannelName[] = "com.skiff/native";
 
 // static
 void SkiffNativePlugin::RegisterWithRegistrar(
-    flutter::PluginRegistrarWindows* registrar) {
+    FlutterDesktopPluginRegistrarRef registrar_ref) {
+  auto* registrar = flutter::PluginRegistrarManager::GetInstance()
+                        ->GetRegistrar<flutter::PluginRegistrarWindows>(
+                            registrar_ref);
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           registrar->messenger(), kChannelName,
@@ -77,15 +80,6 @@ void SkiffNativePlugin::HandleMethodCall(
     result->Success();
   } else if (method == "setOverlayVisible") {
     // The overlay visibility is managed by Dart (window_manager package).
-    // We simply forward the request back to Dart so it can act on it.
-    const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-    bool visible = false;
-    if (args) {
-      auto it = args->find(flutter::EncodableValue("visible"));
-      if (it != args->end()) {
-        visible = std::get<bool>(it->second);
-      }
-    }
     // Nothing to do on the native side -- Dart owns the overlay window.
     result->Success();
   } else if (method == "quit") {

@@ -15,7 +15,7 @@
 // the native Win32 subsystems (scroll simulation, mouse hook, system tray).
 class SkiffNativePlugin : public flutter::Plugin {
  public:
-  static void RegisterWithRegistrar(flutter::PluginRegistrarWindows* registrar);
+  static void RegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar);
 
   SkiffNativePlugin(
       std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel);

@@ -1,5 +1,7 @@
 #include "mouse_hook.h"
 
+#include <windowsx.h>
+
 #include <cmath>
 
 namespace {

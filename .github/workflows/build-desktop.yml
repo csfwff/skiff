@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
   workflow_dispatch:
 
@@ -103,8 +104,18 @@ jobs:
           retention-days: 14
 
   build-macos:
-    name: macOS
-    runs-on: macos-13
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: macos-15-intel
+            flutter_architecture: x64
+          - arch: arm64
+            runner: macos-15
+            flutter_architecture: arm64
 
     steps:
       - name: Checkout
@@ -115,7 +126,7 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          architecture: x64
+          architecture: ${{ matrix.flutter_architecture }}
           cache: true
 
       - name: Get packages
@@ -125,12 +136,12 @@ jobs:
         run: flutter build macos --release --no-codesign
 
       - name: Package
-        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/skiff.app skiff-macos-x64.zip
+        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/skiff.app skiff-macos-${{ matrix.arch }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skiff-macos-x64
-          path: skiff-macos-x64.zip
+          name: skiff-macos-${{ matrix.arch }}
+          path: skiff-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 14
