@@ -22,7 +22,7 @@ class SkiffPlatform: NSObject, FlutterPlugin {
         trayManager.setup(channel: channel)
     }
 
-    private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
         case "initialize":
             handleInitialize(result: result)
@@ -33,7 +33,7 @@ class SkiffPlatform: NSObject, FlutterPlugin {
                   let dy = args["dy"] as? Int else {
                 result(FlutterError(code: "INVALID_ARGS",
                                     message: "Expected dx and dy",
-                                    arguments: nil))
+                                    details: nil))
                 return
             }
             scrollSimulator.scroll(dx: dx, dy: dy)
@@ -44,7 +44,7 @@ class SkiffPlatform: NSObject, FlutterPlugin {
                   let enabled = args["enabled"] as? Bool else {
                 result(FlutterError(code: "INVALID_ARGS",
                                     message: "Expected enabled bool",
-                                    arguments: nil))
+                                    details: nil))
                 return
             }
             if enabled {
@@ -59,14 +59,7 @@ class SkiffPlatform: NSObject, FlutterPlugin {
             result(nil)
 
         case "setOverlayVisible":
-            guard let args = call.arguments as? [String: Any],
-                  let visible = args["visible"] as? Bool else {
-                result(FlutterError(code: "INVALID_ARGS",
-                                    message: "Expected visible bool",
-                                    arguments: nil))
-                return
-            }
-            // Forward visibility state; Dart side handles window show/hide
+            // Dart side handles window show/hide.
             result(nil)
 
         case "checkAccessibilityPermission":

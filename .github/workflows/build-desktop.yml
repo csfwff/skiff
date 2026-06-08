@@ -113,9 +113,11 @@ jobs:
           - arch: x64
             runner: macos-15-intel
             flutter_architecture: x64
+            xcode_arch: x86_64
           - arch: arm64
             runner: macos-15
             flutter_architecture: arm64
+            xcode_arch: arm64
 
     steps:
       - name: Checkout
@@ -133,6 +135,8 @@ jobs:
         run: flutter pub get
 
       - name: Build
+        env:
+          FLUTTER_XCODE_ARCHS: ${{ matrix.xcode_arch }}
         run: flutter build macos --release
 
       - name: Package

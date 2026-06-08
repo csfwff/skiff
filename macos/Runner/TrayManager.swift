@@ -11,12 +11,12 @@ class TrayManager {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem?.button {
-            if let image = NSImage(systemSymbolName: "arrow.up.arrow.down",
-                                   accessibilityDescription: "Skiff") {
+            if #available(macOS 11.0, *),
+               let image = NSImage(systemSymbolName: "arrow.up.arrow.down",
+                                    accessibilityDescription: "Skiff") {
                 image.isTemplate = true
                 button.image = image
             } else {
-                // Fallback for older macOS versions
                 button.title = "S"
             }
         }
