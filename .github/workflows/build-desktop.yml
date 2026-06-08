@@ -5,11 +5,13 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: desktop-${{ github.ref }}
@@ -19,9 +21,41 @@ env:
   FLUTTER_VERSION: 3.44.1
 
 jobs:
+  prepare:
+    name: Prepare Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      release_title: ${{ steps.meta.outputs.release_title }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from pubspec
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ] && [ "${GITHUB_REF_NAME:-}" != "" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            release_version="${GITHUB_REF_NAME#v}"
+          else
+            version_line="$(sed -n 's/^version:[[:space:]]*\([^[:space:]]*\).*/\1/p' pubspec.yaml | head -n1 | tr -d '\r')"
+            if [ -z "$version_line" ]; then
+              echo "Unable to read version from pubspec.yaml" >&2
+              exit 1
+            fi
+            release_version="${version_line%%+*}"
+          fi
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$release_version" >> "$GITHUB_OUTPUT"
+          echo "release_title=Skiff v$release_version" >> "$GITHUB_OUTPUT"
+
   build-linux:
     name: Linux
     runs-on: ubuntu-24.04
+    needs: prepare
 
     steps:
       - name: Checkout
@@ -54,19 +88,20 @@ jobs:
         run: flutter build linux --release
 
       - name: Package
-        run: tar -czf skiff-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+        run: tar -czf skiff-linux-x64-v${{ needs.prepare.outputs.version }}.tar.gz -C build/linux/x64/release/bundle .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skiff-linux-x64
-          path: skiff-linux-x64.tar.gz
+          name: skiff-linux-x64-v${{ needs.prepare.outputs.version }}
+          path: skiff-linux-x64-v${{ needs.prepare.outputs.version }}.tar.gz
           if-no-files-found: error
           retention-days: 14
 
   build-windows:
     name: Windows
     runs-on: windows-2022
+    needs: prepare
 
     steps:
       - name: Checkout
@@ -88,8 +123,9 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          $version = "${{ needs.prepare.outputs.version }}"
           $releaseDir = "build/windows/x64/runner/Release"
-          $zipPath = "skiff-windows-x64.zip"
+          $zipPath = "skiff-windows-x64-v$version.zip"
           if (Test-Path $zipPath) {
             Remove-Item $zipPath
           }
@@ -98,14 +134,15 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skiff-windows-x64
-          path: skiff-windows-x64.zip
+          name: skiff-windows-x64-v${{ needs.prepare.outputs.version }}
+          path: skiff-windows-x64-v${{ needs.prepare.outputs.version }}.zip
           if-no-files-found: error
           retention-days: 14
 
   build-macos:
     name: macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -140,12 +177,51 @@ jobs:
         run: flutter build macos --release
 
       - name: Package
-        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/skiff.app skiff-macos-${{ matrix.arch }}.zip
+        run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/skiff.app skiff-macos-${{ matrix.arch }}-v${{ needs.prepare.outputs.version }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skiff-macos-${{ matrix.arch }}
-          path: skiff-macos-${{ matrix.arch }}.zip
+          name: skiff-macos-${{ matrix.arch }}-v${{ needs.prepare.outputs.version }}
+          path: skiff-macos-${{ matrix.arch }}-v${{ needs.prepare.outputs.version }}.zip
           if-no-files-found: error
           retention-days: 14
+
+  publish-release:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare
+      - build-linux
+      - build-windows
+      - build-macos
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: skiff-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -lh release-assets
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || needs.prepare.outputs.release_tag }}
+          RELEASE_TITLE: ${{ startsWith(github.ref, 'refs/tags/v') && format('Skiff {0}', github.ref_name) || needs.prepare.outputs.release_title }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" --target "$GITHUB_SHA" --title "$RELEASE_TITLE"
+            gh release upload "$TAG_NAME" release-assets/* --clobber
+          else
+            gh release create "$TAG_NAME" release-assets/* \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes "Desktop builds for Skiff ${TAG_NAME}."
+          fi
