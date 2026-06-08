@@ -133,7 +133,7 @@ jobs:
         run: flutter pub get
 
       - name: Build
-        run: flutter build macos --release --no-codesign
+        run: flutter build macos --release
 
       - name: Package
         run: ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/skiff.app skiff-macos-${{ matrix.arch }}.zip

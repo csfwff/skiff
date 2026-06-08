@@ -2,7 +2,6 @@
 #define RUNNER_SKIFF_PLATFORM_H_
 
 #include <flutter/method_channel.h>
-#include <flutter/plugin_registrar_windows.h>
 #include <flutter/standard_method_codec.h>
 
 #include <memory>
@@ -13,13 +12,13 @@
 
 // Flutter plugin that bridges the Dart "com.skiff/native" MethodChannel to
 // the native Win32 subsystems (scroll simulation, mouse hook, system tray).
-class SkiffNativePlugin : public flutter::Plugin {
+class SkiffNativePlugin {
  public:
-  static void RegisterWithRegistrar(FlutterDesktopPluginRegistrarRef registrar);
+  static void RegisterWithMessenger(flutter::BinaryMessenger* messenger);
 
   SkiffNativePlugin(
       std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel);
-  ~SkiffNativePlugin() override;
+  ~SkiffNativePlugin();
 
  private:
   // Handles incoming method calls from Dart.

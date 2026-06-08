@@ -7,24 +7,18 @@
 
 namespace {
 constexpr char kChannelName[] = "com.skiff/native";
+std::unique_ptr<SkiffNativePlugin> g_plugin;
 }  // namespace
 
 // static
-void SkiffNativePlugin::RegisterWithRegistrar(
-    FlutterDesktopPluginRegistrarRef registrar_ref) {
-  auto* registrar = flutter::PluginRegistrarManager::GetInstance()
-                        ->GetRegistrar<flutter::PluginRegistrarWindows>(
-                            registrar_ref);
+void SkiffNativePlugin::RegisterWithMessenger(
+    flutter::BinaryMessenger* messenger) {
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
-          registrar->messenger(), kChannelName,
+          messenger, kChannelName,
           &flutter::StandardMethodCodec::GetInstance());
 
-  auto plugin = std::make_unique<SkiffNativePlugin>(std::move(channel));
-
-  channel = nullptr;  // moved into plugin
-
-  registrar->AddPlugin(std::move(plugin));
+  g_plugin = std::make_unique<SkiffNativePlugin>(std::move(channel));
 }
 
 SkiffNativePlugin::SkiffNativePlugin(

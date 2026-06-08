@@ -27,8 +27,8 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
 
-  SkiffNativePlugin::RegisterWithRegistrar(
-      flutter_controller_->engine()->GetRegistrarForPlugin("SkiffNativePlugin"));
+  SkiffNativePlugin::RegisterWithMessenger(
+      flutter_controller_->engine()->messenger());
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
