@@ -2,12 +2,15 @@
 
 #include "resource.h"
 
+#include <cstdio>
+
 namespace {
 // Menu item IDs.
 constexpr UINT kMenuToggleButton = 1001;
 constexpr UINT kMenuToggleGesture = 1002;
 constexpr UINT kMenuQuit = 1003;
-constexpr UINT kMenuSettings = 1004;
+constexpr UINT kMenuToggleMiddleDragReverse = 1004;
+constexpr UINT kMenuScrollBase = 2000;
 }  // namespace
 
 TrayManager::TrayManager() = default;
@@ -87,6 +90,23 @@ void TrayManager::setTooltip(const std::wstring& tooltip) {
   }
 }
 
+void TrayManager::setGestureEnabled(bool enabled) {
+  gesture_enabled_ = enabled;
+}
+
+void TrayManager::setMiddleDragReversed(bool reversed) {
+  middle_drag_reversed_ = reversed;
+}
+
+void TrayManager::setScrollLines(int lines) {
+  if (lines < 1) {
+    lines = 1;
+  } else if (lines > 10) {
+    lines = 10;
+  }
+  scroll_lines_ = lines;
+}
+
 LRESULT CALLBACK TrayManager::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   TrayManager* self = reinterpret_cast<TrayManager*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
@@ -125,16 +145,33 @@ void TrayManager::showContextMenu() {
 
   // Menu text is in Chinese:
   //   "显示/隐藏按钮" = toggle button visibility
-  //   "设置"          = show settings window
   //   "启用中键手势"  = toggle middle-click gesture
+  //   "中键拖动反向"  = reverse middle-drag gesture
+  //   "滚动行数"      = scroll lines submenu
   //   "退出"          = quit
   AppendMenuW(menu, MF_STRING, kMenuToggleButton,
               L"\x663E\x793A/\x9690\x85CF\x6309\x94AE");
-  AppendMenuW(menu, MF_STRING, kMenuSettings,
-              L"\x8BBE\x7F6E");
   AppendMenuW(menu, MF_STRING | (gesture_enabled_ ? MF_CHECKED : MF_UNCHECKED),
               kMenuToggleGesture,
               L"\x542F\x7528\x4E2D\x952E\x624B\x52BF");
+  AppendMenuW(menu,
+              MF_STRING |
+                  (middle_drag_reversed_ ? MF_CHECKED : MF_UNCHECKED),
+              kMenuToggleMiddleDragReverse,
+              L"\x4E2D\x952E\x62D6\x52A8\x53CD\x5411");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+
+  HMENU scroll_menu = CreatePopupMenu();
+  for (int i = 1; i <= 10; ++i) {
+    wchar_t label[8];
+    swprintf_s(label, sizeof(label) / sizeof(label[0]), L"%d", i);
+    AppendMenuW(scroll_menu,
+                MF_STRING | (i == scroll_lines_ ? MF_CHECKED : MF_UNCHECKED),
+                kMenuScrollBase + i, label);
+  }
+  AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(scroll_menu),
+              L"\x6EDA\x52A8\x884C\x6570");
+
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kMenuQuit,
               L"\x9000\x51FA");
@@ -150,16 +187,24 @@ void TrayManager::showContextMenu() {
   DestroyMenu(menu);
 
   if (menu_callback_) {
+    if (cmd > kMenuScrollBase && cmd <= kMenuScrollBase + 10) {
+      const int lines = static_cast<int>(cmd - kMenuScrollBase);
+      setScrollLines(lines);
+      menu_callback_("scroll_" + std::to_string(lines));
+      return;
+    }
+
     switch (cmd) {
       case kMenuToggleButton:
         menu_callback_("toggle_button");
         break;
-      case kMenuSettings:
-        menu_callback_("show_settings");
-        break;
       case kMenuToggleGesture:
         gesture_enabled_ = !gesture_enabled_;
         menu_callback_("toggle_gesture");
+        break;
+      case kMenuToggleMiddleDragReverse:
+        middle_drag_reversed_ = !middle_drag_reversed_;
+        menu_callback_("toggle_middle_drag_reverse");
         break;
       case kMenuQuit:
         menu_callback_("quit");

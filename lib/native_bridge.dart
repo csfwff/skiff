@@ -58,7 +58,7 @@ class NativeBridge {
 
   /// 设置当前窗口是否处于悬浮按钮模式。
   ///
-  /// Linux 下悬浮按钮模式会禁止窗口主动接受焦点；进入设置页时恢复。
+  /// Linux 下悬浮按钮模式会禁止窗口主动接受焦点。
   Future<void> setOverlayMode(bool enabled) async {
     try {
       await _channel.invokeMethod('setOverlayMode', {'enabled': enabled});
@@ -96,19 +96,21 @@ class NativeBridge {
     }
   }
 
-  /// 显示主窗口（设置界面）
-  Future<void> showMainWindow() async {
+  /// 更新托盘菜单中的滚动行数状态
+  Future<void> setScrollLines(int lines) async {
     try {
-      await _channel.invokeMethod('showMainWindow');
+      await _channel.invokeMethod('setScrollLines', {'lines': lines});
     } on MissingPluginException {
       // 平台原生代码尚未实现时忽略
     }
   }
 
-  /// 隐藏主窗口
-  Future<void> hideMainWindow() async {
+  /// 更新托盘菜单中的中键拖动反向状态
+  Future<void> setMiddleDragReversed(bool reversed) async {
     try {
-      await _channel.invokeMethod('hideMainWindow');
+      await _channel.invokeMethod('setMiddleDragReversed', {
+        'reversed': reversed,
+      });
     } on MissingPluginException {
       // 平台原生代码尚未实现时忽略
     }

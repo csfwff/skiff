@@ -19,6 +19,7 @@ struct _SkiffNativePlugin {
   TrayManager* tray;
   MouseHook* mouse_hook;
   gboolean gesture_enabled;
+  gboolean middle_drag_reversed;
   gboolean auto_start;
   int scroll_lines;
 };
@@ -135,6 +136,10 @@ static void on_tray_action(const char* action, gpointer user_data) {
     if (self->mouse_hook) {
       mouse_hook_set_enabled(self->mouse_hook, self->gesture_enabled);
     }
+  } else if (g_strcmp0(action, "toggle_middle_drag_reverse") == 0) {
+    self->middle_drag_reversed = !self->middle_drag_reversed;
+    tray_manager_set_middle_drag_reversed(self->tray,
+                                          self->middle_drag_reversed);
   } else if (g_strcmp0(action, "toggle_autostart") == 0) {
     // Dart owns the persisted setting and will call setAutoStart with the
     // target value. Keeping the write in one place avoids stale state after
@@ -272,6 +277,58 @@ static FlMethodResponse* handle_set_middle_click_enabled(
   }
   if (self->tray) {
     tray_manager_set_gesture_checked(self->tray, enabled);
+  }
+
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(
+      fl_value_new_null()));
+}
+
+static FlMethodResponse* handle_set_middle_drag_reversed(
+    SkiffNativePlugin* self, FlValue* args) {
+  if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "INVALID_ARGS", "Expected map with reversed", nullptr));
+  }
+
+  FlValue* reversed_val = fl_value_lookup_string(args, "reversed");
+  if (!reversed_val) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "INVALID_ARGS", "Missing reversed parameter", nullptr));
+  }
+
+  self->middle_drag_reversed = fl_value_get_bool(reversed_val);
+  if (self->tray) {
+    tray_manager_set_middle_drag_reversed(self->tray,
+                                          self->middle_drag_reversed);
+  }
+
+  return FL_METHOD_RESPONSE(fl_method_success_response_new(
+      fl_value_new_null()));
+}
+
+static FlMethodResponse* handle_set_scroll_lines(SkiffNativePlugin* self,
+                                                   FlValue* args) {
+  if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "INVALID_ARGS", "Expected map with lines", nullptr));
+  }
+
+  FlValue* lines_val = fl_value_lookup_string(args, "lines");
+  if (!lines_val) {
+    return FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "INVALID_ARGS", "Missing lines parameter", nullptr));
+  }
+
+  int lines = (int)fl_value_get_int(lines_val);
+  if (lines < 1) {
+    lines = 1;
+  } else if (lines > 10) {
+    lines = 10;
+  }
+
+  self->scroll_lines = lines;
+  if (self->tray) {
+    tray_manager_set_scroll_lines(self->tray, lines);
   }
 
   return FL_METHOD_RESPONSE(fl_method_success_response_new(
@@ -468,6 +525,10 @@ static FlMethodResponse* handle_method_call(SkiffNativePlugin* self,
     return handle_set_overlay_mode(self, args);
   } else if (g_strcmp0(method, "setMiddleClickEnabled") == 0) {
     return handle_set_middle_click_enabled(self, args);
+  } else if (g_strcmp0(method, "setMiddleDragReversed") == 0) {
+    return handle_set_middle_drag_reversed(self, args);
+  } else if (g_strcmp0(method, "setScrollLines") == 0) {
+    return handle_set_scroll_lines(self, args);
   } else if (g_strcmp0(method, "setOverlayVisible") == 0) {
     return handle_set_overlay_visible(self, args);
   } else if (g_strcmp0(method, "setAutoStart") == 0) {

@@ -14,6 +14,7 @@ typedef struct _TrayManager TrayManager;
 TrayManager* tray_manager_new(TrayActionCallback callback, gpointer user_data);
 
 void tray_manager_set_gesture_checked(TrayManager* tray, gboolean checked);
+void tray_manager_set_middle_drag_reversed(TrayManager* tray, gboolean reversed);
 void tray_manager_set_auto_start_checked(TrayManager* tray, gboolean checked);
 void tray_manager_set_scroll_lines(TrayManager* tray, int lines);
 

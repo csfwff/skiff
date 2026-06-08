@@ -5,6 +5,7 @@ import 'dart:io';
 class SettingsData {
   final bool buttonVisible;
   final bool middleClickEnabled;
+  final bool middleDragReversed;
   final double buttonX;
   final double buttonY;
   final int scrollLines;
@@ -13,6 +14,7 @@ class SettingsData {
   const SettingsData({
     this.buttonVisible = true,
     this.middleClickEnabled = true,
+    this.middleDragReversed = false,
     this.buttonX = -1,
     this.buttonY = -1,
     this.scrollLines = 3,
@@ -22,6 +24,7 @@ class SettingsData {
   SettingsData copyWith({
     bool? buttonVisible,
     bool? middleClickEnabled,
+    bool? middleDragReversed,
     double? buttonX,
     double? buttonY,
     int? scrollLines,
@@ -30,6 +33,7 @@ class SettingsData {
     return SettingsData(
       buttonVisible: buttonVisible ?? this.buttonVisible,
       middleClickEnabled: middleClickEnabled ?? this.middleClickEnabled,
+      middleDragReversed: middleDragReversed ?? this.middleDragReversed,
       buttonX: buttonX ?? this.buttonX,
       buttonY: buttonY ?? this.buttonY,
       scrollLines: scrollLines ?? this.scrollLines,
@@ -38,22 +42,24 @@ class SettingsData {
   }
 
   Map<String, dynamic> toJson() => {
-        'buttonVisible': buttonVisible,
-        'middleClickEnabled': middleClickEnabled,
-        'buttonX': buttonX,
-        'buttonY': buttonY,
-        'scrollLines': scrollLines,
-        'autoStart': autoStart,
-      };
+    'buttonVisible': buttonVisible,
+    'middleClickEnabled': middleClickEnabled,
+    'middleDragReversed': middleDragReversed,
+    'buttonX': buttonX,
+    'buttonY': buttonY,
+    'scrollLines': scrollLines,
+    'autoStart': autoStart,
+  };
 
   factory SettingsData.fromJson(Map<String, dynamic> json) => SettingsData(
-        buttonVisible: json['buttonVisible'] as bool? ?? true,
-        middleClickEnabled: json['middleClickEnabled'] as bool? ?? true,
-        buttonX: (json['buttonX'] as num?)?.toDouble() ?? -1,
-        buttonY: (json['buttonY'] as num?)?.toDouble() ?? -1,
-        scrollLines: json['scrollLines'] as int? ?? 3,
-        autoStart: json['autoStart'] as bool? ?? false,
-      );
+    buttonVisible: json['buttonVisible'] as bool? ?? true,
+    middleClickEnabled: json['middleClickEnabled'] as bool? ?? true,
+    middleDragReversed: json['middleDragReversed'] as bool? ?? false,
+    buttonX: (json['buttonX'] as num?)?.toDouble() ?? -1,
+    buttonY: (json['buttonY'] as num?)?.toDouble() ?? -1,
+    scrollLines: json['scrollLines'] as int? ?? 3,
+    autoStart: json['autoStart'] as bool? ?? false,
+  );
 }
 
 /// 设置持久化服务
@@ -71,7 +77,8 @@ class SettingsService {
     } else if (Platform.isMacOS) {
       dir = '${Platform.environment['HOME']}/Library/Application Support';
     } else {
-      dir = Platform.environment['XDG_CONFIG_HOME'] ??
+      dir =
+          Platform.environment['XDG_CONFIG_HOME'] ??
           '${Platform.environment['HOME']}/.config';
     }
     final directory = Directory('$dir/Skiff');
@@ -101,6 +108,8 @@ class SettingsService {
   static Future<void> save(SettingsData data) async {
     _cached = data;
     final f = await _file();
-    await f.writeAsString(const JsonEncoder.withIndent('  ').convert(data.toJson()));
+    await f.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(data.toJson()),
+    );
   }
 }

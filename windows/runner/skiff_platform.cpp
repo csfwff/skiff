@@ -71,6 +71,29 @@ void SkiffNativePlugin::HandleMethodCall(
       }
     }
     mouse_hook_.setEnabled(enabled);
+    tray_manager_.setGestureEnabled(enabled);
+    result->Success();
+  } else if (method == "setMiddleDragReversed") {
+    const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+    bool reversed = false;
+    if (args) {
+      auto it = args->find(flutter::EncodableValue("reversed"));
+      if (it != args->end()) {
+        reversed = std::get<bool>(it->second);
+      }
+    }
+    tray_manager_.setMiddleDragReversed(reversed);
+    result->Success();
+  } else if (method == "setScrollLines") {
+    const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+    int lines = 3;
+    if (args) {
+      auto it = args->find(flutter::EncodableValue("lines"));
+      if (it != args->end()) {
+        lines = static_cast<int>(std::get<int64_t>(it->second));
+      }
+    }
+    tray_manager_.setScrollLines(lines);
     result->Success();
   } else if (method == "setOverlayVisible") {
     // The overlay visibility is managed by Dart (window_manager package).
@@ -79,20 +102,6 @@ void SkiffNativePlugin::HandleMethodCall(
   } else if (method == "quit") {
     result->Success();
     PostQuitMessage(0);
-  } else if (method == "showMainWindow") {
-    // Show the main Flutter window.
-    HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
-    if (hwnd) {
-      ::ShowWindow(hwnd, SW_SHOWNORMAL);
-      ::SetForegroundWindow(hwnd);
-    }
-    result->Success();
-  } else if (method == "hideMainWindow") {
-    HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
-    if (hwnd) {
-      ::ShowWindow(hwnd, SW_HIDE);
-    }
-    result->Success();
   } else if (method == "checkAccessibilityPermission") {
     // Windows does not require special accessibility permissions for
     // global hooks the way macOS does.

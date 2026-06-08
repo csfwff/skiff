@@ -62,6 +62,28 @@ class SkiffPlatform: NSObject, FlutterPlugin {
             // Dart side handles window show/hide.
             result(nil)
 
+        case "setScrollLines":
+            guard let args = call.arguments as? [String: Any],
+                  let lines = args["lines"] as? Int else {
+                result(FlutterError(code: "INVALID_ARGS",
+                                    message: "Expected lines int",
+                                    details: nil))
+                return
+            }
+            trayManager.updateScrollLines(lines: lines)
+            result(nil)
+
+        case "setMiddleDragReversed":
+            guard let args = call.arguments as? [String: Any],
+                  let reversed = args["reversed"] as? Bool else {
+                result(FlutterError(code: "INVALID_ARGS",
+                                    message: "Expected reversed bool",
+                                    details: nil))
+                return
+            }
+            trayManager.updateMiddleDragReversed(reversed: reversed)
+            result(nil)
+
         case "checkAccessibilityPermission":
             let granted = AccessibilityHelper.checkPermission()
             result(["granted": granted])

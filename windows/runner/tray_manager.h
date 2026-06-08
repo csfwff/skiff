@@ -12,6 +12,8 @@
 // Context menu items:
 //   "显示/隐藏按钮"   -> toggle_button
 //   "启用中键手势"    -> toggle_gesture
+//   "中键拖动反向"    -> toggle_middle_drag_reverse
+//   "滚动行数"        -> scroll_N
 //   separator
 //   "退出"            -> quit
 class TrayManager {
@@ -36,6 +38,15 @@ class TrayManager {
   // Update the tooltip text (e.g. to reflect enabled/disabled state).
   void setTooltip(const std::wstring& tooltip);
 
+  // Updates the checked value for the middle-click gesture menu item.
+  void setGestureEnabled(bool enabled);
+
+  // Updates the checked value for the reverse middle-drag menu item.
+  void setMiddleDragReversed(bool reversed);
+
+  // Updates the checked value in the scroll-lines submenu.
+  void setScrollLines(int lines);
+
  private:
   // Window procedure for the hidden message-only window.
   static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -51,6 +62,8 @@ class TrayManager {
   UINT taskbar_created_msg_ = 0;
   bool icon_added_ = false;
   bool gesture_enabled_ = false;
+  bool middle_drag_reversed_ = false;
+  int scroll_lines_ = 3;
 
   MenuCallback menu_callback_;
 

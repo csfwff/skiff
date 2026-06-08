@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,17 +11,19 @@ import 'scroll_button_overlay.dart';
 import 'settings.dart';
 
 const _overlayWindowSize = Size(50, 110);
-const _settingsWindowSize = Size(420, 430);
 
 /// 轻舟 / Skiff - 鼠标滚轮模拟器
 ///
 /// 启动后显示悬浮滚动按钮，系统托盘管理。
-/// 主窗口默认隐藏，通过托盘菜单打开设置界面。
+/// 托盘菜单提供显示/隐藏、手势、滚动行数和退出操作。
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 初始化 window_manager
   await windowManager.ensureInitialized();
+
+  // 加载设置，决定启动后悬浮窗的初始可见性
+  var settings = await SettingsService.load();
 
   // 配置窗口：无边框、透明、始终在上、不在任务栏显示
   const windowOptions = WindowOptions(
@@ -37,19 +40,22 @@ void main() async {
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
     await windowManager.setBackgroundColor(Colors.transparent);
-    await windowManager.show();
     await windowManager.setSize(_overlayWindowSize);
     await windowManager.setMinimumSize(_overlayWindowSize);
     await windowManager.setMaximumSize(_overlayWindowSize);
+    if (settings.buttonVisible) {
+      await windowManager.show();
+    } else {
+      await windowManager.hide();
+    }
   });
-
-  // 加载设置
-  var settings = await SettingsService.load();
 
   // 初始化原生桥接
   final nativeBridge = NativeBridge();
   await nativeBridge.initialize();
   await nativeBridge.setMiddleClickEnabled(settings.middleClickEnabled);
+  await nativeBridge.setMiddleDragReversed(settings.middleDragReversed);
+  await nativeBridge.setScrollLines(settings.scrollLines);
   if (Platform.isLinux) {
     final actualAutoStart = await nativeBridge.getAutoStart();
     if (settings.autoStart && !actualAutoStart) {
@@ -81,7 +87,7 @@ class SkiffApp extends StatefulWidget {
 
 class _SkiffAppState extends State<SkiffApp> with WindowListener {
   late SettingsData _settings;
-  bool _showSettings = false;
+  bool _suspendOverlayPositionSaving = false;
   Timer? _savePosTimer;
 
   @override
@@ -97,8 +103,8 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
     widget.nativeBridge.onMiddleClickGesture = _handleMiddleClickGesture;
     widget.nativeBridge.onTrayAction = _handleTrayAction;
 
-    // 设置初始窗口位置
-    _applyWindowPosition();
+    // 按当前设置恢复悬浮窗状态
+    unawaited(_restoreOverlayWindowState());
 
     // macOS 辅助功能权限检查
     if (Platform.isMacOS) {
@@ -108,28 +114,114 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
 
   @override
   void dispose() {
+    _savePosTimer?.cancel();
     windowManager.removeListener(this);
     super.dispose();
   }
 
   @override
   void onWindowMove() {
+    if (_suspendOverlayPositionSaving) {
+      return;
+    }
+
     // 防抖：拖拽结束后 500ms 才保存位置
     _savePosTimer?.cancel();
     _savePosTimer = Timer(const Duration(milliseconds: 500), () {
-      windowManager.getPosition().then((pos) {
-        _settings = _settings.copyWith(buttonX: pos.dx, buttonY: pos.dy);
-        SettingsService.save(_settings);
-      });
+      unawaited(_saveOverlayPositionIfNeeded());
     });
+  }
+
+  Rect _displayBounds(dynamic display) {
+    final position = display.visiblePosition ?? Offset.zero;
+    final size = display.visibleSize ?? display.size;
+    return Rect.fromLTWH(position.dx, position.dy, size.width, size.height);
+  }
+
+  Future<List<Rect>> _getDisplayBounds() async {
+    try {
+      final displays = await screenRetriever.getAllDisplays();
+      if (displays.isNotEmpty) {
+        return displays.map(_displayBounds).toList();
+      }
+    } catch (e) {
+      debugPrint('读取屏幕列表失败: $e');
+    }
+
+    try {
+      return [_displayBounds(await screenRetriever.getPrimaryDisplay())];
+    } catch (e) {
+      debugPrint('读取主屏幕信息失败: $e');
+      return const [];
+    }
+  }
+
+  Rect _pickDisplayForPosition(List<Rect> displays, Offset position) {
+    final windowCenter = Offset(
+      position.dx + _overlayWindowSize.width / 2,
+      position.dy + _overlayWindowSize.height / 2,
+    );
+    for (final display in displays) {
+      if (display.contains(windowCenter)) {
+        return display;
+      }
+    }
+
+    var bestDisplay = displays.first;
+    var bestDistance = double.infinity;
+    for (final display in displays) {
+      final center = display.center;
+      final dx = windowCenter.dx - center.dx;
+      final dy = windowCenter.dy - center.dy;
+      final distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestDisplay = display;
+      }
+    }
+    return bestDisplay;
+  }
+
+  Future<Offset> _normalizeOverlayPosition(Offset position) async {
+    final displays = await _getDisplayBounds();
+    if (displays.isEmpty) {
+      return const Offset(40, 40);
+    }
+
+    final display = _pickDisplayForPosition(displays, position);
+    final minX = display.left;
+    final maxX = math.max(
+      display.left,
+      display.right - _overlayWindowSize.width,
+    );
+    final minY = display.top;
+    final maxY = math.max(
+      display.top,
+      display.bottom - _overlayWindowSize.height,
+    );
+
+    return Offset(
+      position.dx.clamp(minX, maxX).toDouble(),
+      position.dy.clamp(minY, maxY).toDouble(),
+    );
   }
 
   /// 应用窗口位置设置
   Future<void> _applyWindowPosition() async {
     if (_settings.buttonX >= 0 && _settings.buttonY >= 0) {
-      await windowManager.setPosition(
+      final normalizedPosition = await _normalizeOverlayPosition(
         Offset(_settings.buttonX, _settings.buttonY),
       );
+      await windowManager.setPosition(normalizedPosition);
+
+      if ((normalizedPosition.dx - _settings.buttonX).abs() > 0.5 ||
+          (normalizedPosition.dy - _settings.buttonY).abs() > 0.5) {
+        _settings = _settings.copyWith(
+          buttonX: normalizedPosition.dx,
+          buttonY: normalizedPosition.dy,
+        );
+        await SettingsService.save(_settings);
+      }
     } else {
       // 默认右下角
       await _setWindowToBottomRight();
@@ -143,13 +235,50 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
       final display = await screenRetriever.getPrimaryDisplay();
       final screenWidth = display.visibleSize?.width ?? display.size.width;
       final screenHeight = display.visibleSize?.height ?? display.size.height;
-      final x = screenWidth - 50 - 20;
-      final y = screenHeight - 110 - 60;
-      await windowManager.setPosition(Offset(x, y));
+      final x = math.max(0.0, screenWidth - _overlayWindowSize.width - 20);
+      final y = math.max(0.0, screenHeight - _overlayWindowSize.height - 60);
+      final position = Offset(x, y);
+      await windowManager.setPosition(position);
       _settings = _settings.copyWith(buttonX: x, buttonY: y);
       await SettingsService.save(_settings);
     } catch (e) {
-      await windowManager.setPosition(const Offset(1800, 900));
+      debugPrint('设置默认悬浮窗位置失败: $e');
+      const fallback = Offset(40, 40);
+      await windowManager.setPosition(fallback);
+      _settings = _settings.copyWith(
+        buttonX: fallback.dx,
+        buttonY: fallback.dy,
+      );
+      await SettingsService.save(_settings);
+    }
+  }
+
+  Future<void> _saveOverlayPositionIfNeeded() async {
+    if (_suspendOverlayPositionSaving) {
+      return;
+    }
+
+    _suspendOverlayPositionSaving = true;
+    try {
+      final currentPosition = await windowManager.getPosition();
+      final normalizedPosition = await _normalizeOverlayPosition(
+        currentPosition,
+      );
+
+      if ((normalizedPosition.dx - currentPosition.dx).abs() > 0.5 ||
+          (normalizedPosition.dy - currentPosition.dy).abs() > 0.5) {
+        await windowManager.setPosition(normalizedPosition);
+      }
+
+      _settings = _settings.copyWith(
+        buttonX: normalizedPosition.dx,
+        buttonY: normalizedPosition.dy,
+      );
+      await SettingsService.save(_settings);
+    } catch (e, stackTrace) {
+      debugPrint('保存悬浮窗位置失败: $e\n$stackTrace');
+    } finally {
+      _suspendOverlayPositionSaving = false;
     }
   }
 
@@ -162,15 +291,67 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
 
   /// 处理中键手势
   void _handleMiddleClickGesture(String direction) {
-    switch (direction) {
-      case 'up':
-        widget.nativeBridge.simulateScroll(0, -_settings.scrollLines);
-      case 'down':
-        widget.nativeBridge.simulateScroll(0, _settings.scrollLines);
-      case 'left':
-        widget.nativeBridge.simulateScroll(-_settings.scrollLines, 0);
-      case 'right':
-        widget.nativeBridge.simulateScroll(_settings.scrollLines, 0);
+    final lines = _settings.middleDragReversed
+        ? -_settings.scrollLines
+        : _settings.scrollLines;
+    if (direction == 'up') {
+      widget.nativeBridge.simulateScroll(0, -lines);
+    } else if (direction == 'down') {
+      widget.nativeBridge.simulateScroll(0, lines);
+    } else if (direction == 'left') {
+      widget.nativeBridge.simulateScroll(-lines, 0);
+    } else if (direction == 'right') {
+      widget.nativeBridge.simulateScroll(lines, 0);
+    }
+  }
+
+  Future<void> _restoreOverlayWindowState() async {
+    try {
+      if (_settings.buttonVisible) {
+        await _showOverlayWindow();
+      } else {
+        await _hideOverlayWindow();
+      }
+    } catch (e, stackTrace) {
+      debugPrint('恢复悬浮窗状态失败: $e\n$stackTrace');
+    }
+  }
+
+  Future<void> _showOverlayWindow() async {
+    _suspendOverlayPositionSaving = true;
+    try {
+      await widget.nativeBridge.setOverlayMode(true);
+      await windowManager.setTitle('Skiff');
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setSkipTaskbar(true);
+      await windowManager.setMinimumSize(_overlayWindowSize);
+      await windowManager.setMaximumSize(_overlayWindowSize);
+      await windowManager.setSize(_overlayWindowSize);
+      await _applyWindowPosition();
+      await widget.nativeBridge.setOverlayVisible(true);
+      await windowManager.show();
+    } finally {
+      _suspendOverlayPositionSaving = false;
+    }
+  }
+
+  Future<void> _hideOverlayWindow() async {
+    await widget.nativeBridge.setOverlayVisible(false);
+    await windowManager.hide();
+  }
+
+  Future<void> _updateButtonVisibility(bool visible) async {
+    _settings = _settings.copyWith(buttonVisible: visible);
+    await SettingsService.save(_settings);
+
+    if (visible) {
+      await _showOverlayWindow();
+    } else {
+      await _hideOverlayWindow();
+    }
+
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -188,12 +369,12 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
   }
 
   Future<void> _runTrayAction(String action) async {
-    if (action == 'show_settings') {
-      await _showSettingsWindow();
-    } else if (action == 'toggle_button') {
+    if (action == 'toggle_button') {
       await _toggleButtonVisibility();
     } else if (action == 'toggle_gesture') {
       await _toggleMiddleClick();
+    } else if (action == 'toggle_middle_drag_reverse') {
+      await _toggleMiddleDragReversed();
     } else if (action == 'toggle_autostart') {
       await _toggleAutoStart();
     } else if (action.startsWith('scroll_')) {
@@ -208,17 +389,7 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
 
   /// 切换悬浮按钮可见性
   Future<void> _toggleButtonVisibility() async {
-    final newVisible = !_settings.buttonVisible;
-    _settings = _settings.copyWith(buttonVisible: newVisible);
-    await SettingsService.save(_settings);
-    await widget.nativeBridge.setOverlayVisible(newVisible);
-
-    if (newVisible) {
-      await windowManager.show();
-    } else {
-      await windowManager.hide();
-    }
-    setState(() {});
+    await _updateButtonVisibility(!_settings.buttonVisible);
   }
 
   /// 切换中键手势
@@ -227,6 +398,15 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
     _settings = _settings.copyWith(middleClickEnabled: newEnabled);
     await SettingsService.save(_settings);
     await widget.nativeBridge.setMiddleClickEnabled(newEnabled);
+    setState(() {});
+  }
+
+  /// 切换中键拖动反向
+  Future<void> _toggleMiddleDragReversed() async {
+    final reversed = !_settings.middleDragReversed;
+    _settings = _settings.copyWith(middleDragReversed: reversed);
+    await SettingsService.save(_settings);
+    await widget.nativeBridge.setMiddleDragReversed(reversed);
     setState(() {});
   }
 
@@ -243,48 +423,8 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
   Future<void> _setScrollLines(int lines) async {
     _settings = _settings.copyWith(scrollLines: lines);
     await SettingsService.save(_settings);
+    await widget.nativeBridge.setScrollLines(lines);
     setState(() {});
-  }
-
-  /// 显示设置窗口
-  Future<void> _showSettingsWindow() async {
-    if (_showSettings) return;
-
-    await widget.nativeBridge.setOverlayMode(false);
-    await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSkipTaskbar(false);
-    await windowManager.setTitle('Skiff 设置');
-    await windowManager.setMaximumSize(_settingsWindowSize);
-    await windowManager.setMinimumSize(_settingsWindowSize);
-    await windowManager.setSize(_settingsWindowSize);
-    await windowManager.center();
-    await windowManager.show();
-    await windowManager.focus();
-
-    if (mounted) {
-      setState(() => _showSettings = true);
-    }
-  }
-
-  /// 关闭设置窗口，回到悬浮按钮模式
-  Future<void> _closeSettings() async {
-    await windowManager.setAlwaysOnTop(true);
-    await windowManager.setSkipTaskbar(true);
-    await windowManager.setMinimumSize(_overlayWindowSize);
-    await windowManager.setMaximumSize(_overlayWindowSize);
-    await windowManager.setSize(_overlayWindowSize);
-    await _applyWindowPosition();
-    await widget.nativeBridge.setOverlayMode(true);
-
-    if (mounted) {
-      setState(() => _showSettings = false);
-    }
-
-    if (_settings.buttonVisible) {
-      await windowManager.show();
-    } else {
-      await windowManager.hide();
-    }
   }
 
   /// 检查 macOS 辅助功能权限
@@ -331,7 +471,7 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
           brightness: Brightness.dark,
         ),
       ),
-      home: _showSettings ? _buildSettingsPage() : _buildOverlayPage(),
+      home: _buildOverlayPage(),
     );
   }
 
@@ -344,123 +484,6 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
           onScrollUp: () => _handleOverlayTap('up'),
           onScrollDown: () => _handleOverlayTap('down'),
         ),
-      ),
-    );
-  }
-
-  /// 构建设置页面
-  Widget _buildSettingsPage() {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Skiff 设置'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: _closeSettings,
-          tooltip: '返回悬浮按钮',
-        ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ── 悬浮按钮开关 ──
-          SwitchListTile(
-            title: const Text('显示悬浮按钮'),
-            subtitle: const Text('在屏幕上显示滚动按钮悬浮条'),
-            value: _settings.buttonVisible,
-            onChanged: (v) async {
-              _settings = _settings.copyWith(buttonVisible: v);
-              await SettingsService.save(_settings);
-              await widget.nativeBridge.setOverlayVisible(v);
-              setState(() {});
-            },
-          ),
-          const Divider(),
-
-          // ── 中键手势开关 ──
-          SwitchListTile(
-            title: const Text('启用中键手势'),
-            subtitle: const Text('按住鼠标中键 + 移动 > 20px → 松开触发滚动'),
-            value: _settings.middleClickEnabled,
-            onChanged: (v) async {
-              _settings = _settings.copyWith(middleClickEnabled: v);
-              await SettingsService.save(_settings);
-              await widget.nativeBridge.setMiddleClickEnabled(v);
-              setState(() {});
-            },
-          ),
-          const Divider(),
-
-          // ── 滚动行数 ──
-          ListTile(
-            title: const Text('每次滚动行数'),
-            subtitle: Row(
-              children: [
-                Expanded(
-                  child: Slider(
-                    value: _settings.scrollLines.toDouble(),
-                    min: 1,
-                    max: 10,
-                    divisions: 9,
-                    label: '${_settings.scrollLines} 行',
-                    onChanged: (v) {
-                      setState(() {
-                        _settings = _settings.copyWith(scrollLines: v.round());
-                      });
-                    },
-                    onChangeEnd: (v) async {
-                      await SettingsService.save(_settings);
-                    },
-                  ),
-                ),
-                SizedBox(
-                  width: 40,
-                  child: Text(
-                    '${_settings.scrollLines}',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-
-          // ── 开机自启 ──
-          SwitchListTile(
-            title: const Text('开机自启'),
-            subtitle: const Text('登录系统时自动启动 Skiff'),
-            value: _settings.autoStart,
-            onChanged: (v) async {
-              _settings = _settings.copyWith(autoStart: v);
-              await SettingsService.save(_settings);
-              await widget.nativeBridge.setAutoStart(v);
-              setState(() {});
-            },
-          ),
-          const Divider(),
-
-          // ── macOS 辅助功能权限 ──
-          if (Platform.isMacOS) ...[
-            ListTile(
-              leading: const Icon(Icons.accessibility),
-              title: const Text('检查辅助功能权限'),
-              subtitle: const Text('中键手势需要辅助功能权限'),
-              onTap: () => widget.nativeBridge.requestAccessibilityPermission(),
-            ),
-            const Divider(),
-          ],
-
-          // ── 使用说明 ──
-          const ListTile(
-            title: Text('使用说明'),
-            subtitle: Text(
-              '• 点击悬浮按钮的 ▲/▼ 区域滚动页面\n'
-              '• 拖拽 ≡ 手柄可移动位置\n'
-              '• 按住中键移动鼠标后松开触发滚动\n'
-              '• 右键点击系统托盘图标查看更多选项',
-            ),
-          ),
-        ],
       ),
     );
   }

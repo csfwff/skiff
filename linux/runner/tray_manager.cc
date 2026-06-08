@@ -9,6 +9,7 @@ struct _TrayManager {
   TrayActionCallback callback;
   gpointer user_data;
   gboolean gesture_checked;
+  gboolean middle_drag_reversed;
   gboolean auto_start_checked;
   int scroll_lines;
 };
@@ -39,12 +40,6 @@ static void on_popup_menu(GtkStatusIcon* icon, guint button,
                    G_CALLBACK(on_menu_item_activate), (gpointer) "toggle_button");
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), toggle_btn);
 
-  GtkWidget* settings_item =
-      gtk_menu_item_new_with_label("\xe8\xae\xbe\xe7\xbd\xae");
-  g_signal_connect(settings_item, "activate",
-                   G_CALLBACK(on_menu_item_activate), (gpointer) "show_settings");
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu), settings_item);
-
   // ── 启用中键手势 ☑/☐ ──
   const char* gesture_label = tray->gesture_checked
       ? "\xe2\x98\x91 \xe5\x90\xaf\xe7\x94\xa8\xe4\xb8\xad\xe9\x94\xae\xe6\x89\x8b\xe5\x8a\xbf"
@@ -53,6 +48,16 @@ static void on_popup_menu(GtkStatusIcon* icon, guint button,
   g_signal_connect(gesture_item, "activate",
                    G_CALLBACK(on_menu_item_activate), (gpointer) "toggle_gesture");
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), gesture_item);
+
+  // ── 中键拖动反向 ☑/☐ ──
+  const char* reverse_label = tray->middle_drag_reversed
+      ? "\xe2\x98\x91 \xe4\xb8\xad\xe9\x94\xae\xe6\x8b\x96\xe5\x8a\xa8\xe5\x8f\x8d\xe5\x90\x91"
+      : "\xe2\x98\x90 \xe4\xb8\xad\xe9\x94\xae\xe6\x8b\x96\xe5\x8a\xa8\xe5\x8f\x8d\xe5\x90\x91";
+  GtkWidget* reverse_item = gtk_menu_item_new_with_label(reverse_label);
+  g_signal_connect(reverse_item, "activate",
+                   G_CALLBACK(on_menu_item_activate),
+                   (gpointer) "toggle_middle_drag_reverse");
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), reverse_item);
 
   // ── 分割线 ──
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
@@ -114,6 +119,7 @@ TrayManager* tray_manager_new(TrayActionCallback callback, gpointer user_data) {
   tray->callback = callback;
   tray->user_data = user_data;
   tray->gesture_checked = TRUE;
+  tray->middle_drag_reversed = FALSE;
   tray->auto_start_checked = FALSE;
   tray->scroll_lines = 3;
 
@@ -129,6 +135,10 @@ TrayManager* tray_manager_new(TrayActionCallback callback, gpointer user_data) {
 
 void tray_manager_set_gesture_checked(TrayManager* tray, gboolean checked) {
   if (tray) tray->gesture_checked = checked;
+}
+
+void tray_manager_set_middle_drag_reversed(TrayManager* tray, gboolean reversed) {
+  if (tray) tray->middle_drag_reversed = reversed;
 }
 
 void tray_manager_set_auto_start_checked(TrayManager* tray, gboolean checked) {

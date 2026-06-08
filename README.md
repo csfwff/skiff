@@ -15,10 +15,11 @@
 |------|------|
 | 悬浮滚动按钮 | 50×110px 三区域：▲向上滚动 / ≡拖拽手柄 / ▼向下滚动 |
 | 中键手势滚动 | 按住中键 → 移动 >20px → 松开 → 滚动（支持上下左右） |
+| 中键拖动反向 | 可反转中键手势滚动方向 |
 | 系统托盘 | 右键菜单管理所有设置（见下方） |
 | 滚动行数 | 可调节每次滚动 1-10 行（默认 3 行） |
 | 开机自启 | 登录系统时自动启动（Linux: ~/.config/autostart/） |
-| 设置持久化 | 按钮位置、可见性、手势开关、滚动行数、开机自启自动保存 |
+| 设置持久化 | 按钮位置、可见性、手势开关、反向拖动、滚动行数、开机自启自动保存 |
 | 跨平台 | 支持 Windows、macOS、Linux |
 
 ## 托盘菜单
@@ -29,6 +30,7 @@
 ┌─────────────────────────┐
 │  显示/隐藏按钮           │
 │  ☑ 启用中键手势          │
+│  ☐ 中键拖动反向          │
 │─────────────────────────│
 │  滚动行数 →  ┌────────┐ │
 │              │ ☑ 3    │ │
@@ -198,6 +200,8 @@ while (running) {
 | `initialize` | Dart→Native | 初始化托盘和钩子 |
 | `simulateScroll` | Dart→Native | 发送滚轮事件 |
 | `setMiddleClickEnabled` | Dart→Native | 启停中键手势 |
+| `setMiddleDragReversed` | Dart→Native | 同步中键拖动反向状态 |
+| `setScrollLines` | Dart→Native | 同步托盘滚动行数状态 |
 | `setOverlayVisible` | Dart→Native | 显示/隐藏悬浮窗 |
 | `setAutoStart` | Dart→Native | 设置开机自启 |
 | `quit` | Dart→Native | 退出应用 |
