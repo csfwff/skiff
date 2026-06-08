@@ -1,5 +1,6 @@
 #include "skiff_platform.h"
 
+#include <errno.h>
 #include <unistd.h>
 
 #include <flutter_linux/flutter_linux.h>
@@ -25,8 +26,8 @@ struct _SkiffNativePlugin {
 G_DEFINE_TYPE(SkiffNativePlugin, skiff_native_plugin, G_TYPE_OBJECT)
 
 // Forward declarations.
-static void handle_set_auto_start_impl(SkiffNativePlugin* self,
-                                        gboolean enabled);
+static void handle_set_auto_start_impl(gboolean enabled);
+static gboolean is_auto_start_enabled();
 static FlMethodResponse* handle_method_call(SkiffNativePlugin* self,
                                              const gchar* method,
                                              FlValue* args);
@@ -135,10 +136,9 @@ static void on_tray_action(const char* action, gpointer user_data) {
       mouse_hook_set_enabled(self->mouse_hook, self->gesture_enabled);
     }
   } else if (g_strcmp0(action, "toggle_autostart") == 0) {
-    self->auto_start = !self->auto_start;
-    tray_manager_set_auto_start_checked(self->tray, self->auto_start);
-    // 调用原生设置开机自启
-    handle_set_auto_start_impl(self, self->auto_start);
+    // Dart owns the persisted setting and will call setAutoStart with the
+    // target value. Keeping the write in one place avoids stale state after
+    // Ubuntu launches the app from ~/.config/autostart/skiff.desktop.
   } else if (g_str_has_prefix(action, "scroll_")) {
     int lines = atoi(action + 7);  // "scroll_N" → N
     if (lines >= 1 && lines <= 10) {
@@ -168,6 +168,8 @@ static FlMethodResponse* handle_initialize(SkiffNativePlugin* self) {
   if (!self->tray) {
     self->tray = tray_manager_new(on_tray_action, self);
   }
+  self->auto_start = is_auto_start_enabled();
+  tray_manager_set_auto_start_checked(self->tray, self->auto_start);
 
   // Install the mouse hook for middle-click gestures.
   if (!self->mouse_hook) {
@@ -293,31 +295,113 @@ static const char* get_desktop_file_path() {
   return path;
 }
 
-// 内部实现：设置开机自启（可从托盘菜单和方法通道调用）
-static void handle_set_auto_start_impl(SkiffNativePlugin* self,
-                                        gboolean enabled) {
+static char* quote_desktop_exec_value(const char* value) {
+  GString* quoted = g_string_new("\"");
+  for (const char* p = value; *p != '\0'; p++) {
+    switch (*p) {
+      case '\\':
+      case '"':
+      case '`':
+      case '$':
+        g_string_append_c(quoted, '\\');
+        g_string_append_c(quoted, *p);
+        break;
+      case '%':
+        g_string_append(quoted, "%%");
+        break;
+      default:
+        g_string_append_c(quoted, *p);
+        break;
+    }
+  }
+  g_string_append_c(quoted, '"');
+  return g_string_free(quoted, FALSE);
+}
+
+static gboolean key_file_get_bool_or_default(GKeyFile* key_file,
+                                             const char* key,
+                                             gboolean default_value) {
+  if (!g_key_file_has_key(key_file, "Desktop Entry", key, nullptr)) {
+    return default_value;
+  }
+
+  g_autoptr(GError) error = nullptr;
+  gboolean value =
+      g_key_file_get_boolean(key_file, "Desktop Entry", key, &error);
+  return error == nullptr ? value : default_value;
+}
+
+static gboolean is_auto_start_enabled() {
+  const char* path = get_desktop_file_path();
+  if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+    return FALSE;
+  }
+
+  GKeyFile* key_file = g_key_file_new();
+  g_autoptr(GError) error = nullptr;
+  gboolean loaded =
+      g_key_file_load_from_file(key_file, path, G_KEY_FILE_NONE, &error);
+  if (!loaded) {
+    g_warning("skiff_platform: unable to read autostart file %s: %s", path,
+              error ? error->message : "unknown error");
+    g_key_file_unref(key_file);
+    return FALSE;
+  }
+
+  gboolean hidden = key_file_get_bool_or_default(key_file, "Hidden", FALSE);
+  gboolean enabled = key_file_get_bool_or_default(
+      key_file, "X-GNOME-Autostart-enabled", TRUE);
+  g_key_file_unref(key_file);
+  return !hidden && enabled;
+}
+
+// 内部实现：设置开机自启（由方法通道调用）
+static void handle_set_auto_start_impl(gboolean enabled) {
   const char* path = get_desktop_file_path();
   if (enabled) {
-    char* exe = g_file_read_link("/proc/self/exe", nullptr);
-    if (!exe) return;
+    g_autoptr(GError) read_error = nullptr;
+    char* exe = g_file_read_link("/proc/self/exe", &read_error);
+    if (!exe) {
+      g_warning("skiff_platform: unable to resolve executable path: %s",
+                read_error ? read_error->message : "unknown error");
+      return;
+    }
     char* dir = g_path_get_dirname(path);
-    g_mkdir_with_parents(dir, 0755);
+    if (g_mkdir_with_parents(dir, 0700) != 0) {
+      g_warning("skiff_platform: unable to create autostart directory %s: %s",
+                dir, g_strerror(errno));
+      g_free(dir);
+      g_free(exe);
+      return;
+    }
     g_free(dir);
+    char* exec_value = quote_desktop_exec_value(exe);
     char* content = g_strdup_printf(
         "[Desktop Entry]\n"
+        "Version=1.0\n"
         "Type=Application\n"
         "Name=Skiff\n"
         "Comment=Mouse wheel scroll simulator\n"
         "Exec=%s\n"
+        "Terminal=false\n"
         "Hidden=false\n"
-        "NoDisplay=true\n"
+        "NoDisplay=false\n"
+        "StartupNotify=false\n"
         "X-GNOME-Autostart-enabled=true\n",
-        exe);
-    g_file_set_contents(path, content, -1, nullptr);
+        exec_value);
+    g_autoptr(GError) write_error = nullptr;
+    if (!g_file_set_contents(path, content, -1, &write_error)) {
+      g_warning("skiff_platform: unable to write autostart file %s: %s", path,
+                write_error ? write_error->message : "unknown error");
+    }
     g_free(content);
+    g_free(exec_value);
     g_free(exe);
   } else {
-    unlink(path);
+    if (unlink(path) != 0 && errno != ENOENT) {
+      g_warning("skiff_platform: unable to remove autostart file %s: %s", path,
+                g_strerror(errno));
+    }
   }
 }
 
@@ -335,17 +419,18 @@ static FlMethodResponse* handle_set_auto_start(SkiffNativePlugin* self,
   gboolean enabled = fl_value_get_bool(enabled_val);
   self->auto_start = enabled;
   tray_manager_set_auto_start_checked(self->tray, enabled);
-  handle_set_auto_start_impl(self, enabled);
+  handle_set_auto_start_impl(enabled);
   return FL_METHOD_RESPONSE(fl_method_success_response_new(
       fl_value_new_null()));
 }
 
 static FlMethodResponse* handle_get_auto_start(SkiffNativePlugin* self) {
-  const char* path = get_desktop_file_path();
-  gboolean exists = g_file_test(path, G_FILE_TEST_EXISTS);
+  self->auto_start = is_auto_start_enabled();
+  tray_manager_set_auto_start_checked(self->tray, self->auto_start);
 
   FlValue* result = fl_value_new_map();
-  fl_value_set_string_take(result, "enabled", fl_value_new_bool(exists));
+  fl_value_set_string_take(result, "enabled",
+                           fl_value_new_bool(self->auto_start));
   return FL_METHOD_RESPONSE(fl_method_success_response_new(result));
 }
 

@@ -27,6 +27,10 @@ class TrayManager {
         toggleButton.target = self
         menu.addItem(toggleButton)
 
+        let settingsItem = NSMenuItem(title: "Settings", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         toggleGestureItem = NSMenuItem(title: "Enable Middle-Click Gesture", action: #selector(toggleGesture(_:)), keyEquivalent: "")
         toggleGestureItem?.target = self
         toggleGestureItem?.state = .off
@@ -47,6 +51,10 @@ class TrayManager {
 
     @objc private func toggleOverlay(_ sender: NSMenuItem) {
         channel?.invokeMethod("onTrayAction", arguments: ["action": "toggle_button"])
+    }
+
+    @objc private func showSettings(_ sender: NSMenuItem) {
+        channel?.invokeMethod("onTrayAction", arguments: ["action": "show_settings"])
     }
 
     @objc private func toggleGesture(_ sender: NSMenuItem) {

@@ -132,6 +132,11 @@ build/linux/x64/release/bundle/skiff
 - **☑** 表示已启用，系统登录时自动启动 Skiff
 - **☐** 表示已禁用
 - Linux 实现方式：在 `~/.config/autostart/` 创建 `skiff.desktop` 文件
+- Ubuntu 上如果没有生效，请确认：
+  - 已在托盘菜单或设置窗口勾选“开机自启”
+  - `~/.config/autostart/skiff.desktop` 已生成
+  - 文件里的 `Exec=` 是当前 Skiff 可执行文件的绝对路径
+  - 如果移动过 Skiff 安装目录，请取消勾选后重新勾选一次
 
 ---
 
@@ -159,6 +164,13 @@ pkill -f skiff
 
 ### Q: 如何开机自启？
 **A:** 右键点击托盘图标 → 开机自启（勾选）。Linux 会在 `~/.config/autostart/skiff.desktop` 创建自启动文件。
+
+如果 Ubuntu 仍未启动，可手动检查：
+```bash
+cat ~/.config/autostart/skiff.desktop
+```
+
+确认 `Exec=` 后面的路径存在，并且可以在终端直接运行。Skiff 的 Linux 功能依赖 X11；如果 Ubuntu 登录的是 Wayland 会话，程序即使启动也可能无法正常滚动/监听中键，请在登录界面选择“Ubuntu on Xorg”。
 
 ### Q: 支持 Wayland 吗？
 **A:** 目前不支持。Skiff 依赖 X11 的 XTest 和 XQueryPointer API，Wayland 下这些 API 不可用。请使用 X11 会话。

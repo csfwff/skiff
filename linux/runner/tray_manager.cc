@@ -39,6 +39,12 @@ static void on_popup_menu(GtkStatusIcon* icon, guint button,
                    G_CALLBACK(on_menu_item_activate), (gpointer) "toggle_button");
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), toggle_btn);
 
+  GtkWidget* settings_item =
+      gtk_menu_item_new_with_label("\xe8\xae\xbe\xe7\xbd\xae");
+  g_signal_connect(settings_item, "activate",
+                   G_CALLBACK(on_menu_item_activate), (gpointer) "show_settings");
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), settings_item);
+
   // ── 启用中键手势 ☑/☐ ──
   const char* gesture_label = tray->gesture_checked
       ? "\xe2\x98\x91 \xe5\x90\xaf\xe7\x94\xa8\xe4\xb8\xad\xe9\x94\xae\xe6\x89\x8b\xe5\x8a\xbf"

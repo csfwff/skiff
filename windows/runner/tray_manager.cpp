@@ -7,6 +7,7 @@ namespace {
 constexpr UINT kMenuToggleButton = 1001;
 constexpr UINT kMenuToggleGesture = 1002;
 constexpr UINT kMenuQuit = 1003;
+constexpr UINT kMenuSettings = 1004;
 }  // namespace
 
 TrayManager::TrayManager() = default;
@@ -124,10 +125,13 @@ void TrayManager::showContextMenu() {
 
   // Menu text is in Chinese:
   //   "显示/隐藏按钮" = toggle button visibility
+  //   "设置"          = show settings window
   //   "启用中键手势"  = toggle middle-click gesture
   //   "退出"          = quit
   AppendMenuW(menu, MF_STRING, kMenuToggleButton,
               L"\x663E\x793A/\x9690\x85CF\x6309\x94AE");
+  AppendMenuW(menu, MF_STRING, kMenuSettings,
+              L"\x8BBE\x7F6E");
   AppendMenuW(menu, MF_STRING | (gesture_enabled_ ? MF_CHECKED : MF_UNCHECKED),
               kMenuToggleGesture,
               L"\x542F\x7528\x4E2D\x952E\x624B\x52BF");
@@ -149,6 +153,9 @@ void TrayManager::showContextMenu() {
     switch (cmd) {
       case kMenuToggleButton:
         menu_callback_("toggle_button");
+        break;
+      case kMenuSettings:
+        menu_callback_("show_settings");
         break;
       case kMenuToggleGesture:
         gesture_enabled_ = !gesture_enabled_;

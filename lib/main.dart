@@ -44,11 +44,21 @@ void main() async {
   });
 
   // 加载设置
-  final settings = await SettingsService.load();
+  var settings = await SettingsService.load();
 
   // 初始化原生桥接
   final nativeBridge = NativeBridge();
   await nativeBridge.initialize();
+  await nativeBridge.setMiddleClickEnabled(settings.middleClickEnabled);
+  if (Platform.isLinux) {
+    final actualAutoStart = await nativeBridge.getAutoStart();
+    if (settings.autoStart && !actualAutoStart) {
+      await nativeBridge.setAutoStart(true);
+    } else if (!settings.autoStart && actualAutoStart) {
+      settings = settings.copyWith(autoStart: true);
+      await SettingsService.save(settings);
+    }
+  }
   await nativeBridge.setOverlayMode(true);
 
   runApp(SkiffApp(nativeBridge: nativeBridge, initialSettings: settings));
@@ -178,7 +188,9 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
   }
 
   Future<void> _runTrayAction(String action) async {
-    if (action == 'toggle_button') {
+    if (action == 'show_settings') {
+      await _showSettingsWindow();
+    } else if (action == 'toggle_button') {
       await _toggleButtonVisibility();
     } else if (action == 'toggle_gesture') {
       await _toggleMiddleClick();
