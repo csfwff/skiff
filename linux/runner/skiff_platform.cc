@@ -99,6 +99,15 @@ static void send_middle_click_gesture_to_dart(SkiffNativePlugin* self,
                                    nullptr, nullptr, nullptr);
 }
 
+static void send_right_button_hold_to_dart(SkiffNativePlugin* self,
+                                            int x, int y) {
+  g_autoptr(FlValue) args = fl_value_new_map();
+  fl_value_set_string_take(args, "x", fl_value_new_int(x));
+  fl_value_set_string_take(args, "y", fl_value_new_int(y));
+  fl_method_channel_invoke_method(self->channel, "onRightButtonHold", args,
+                                   nullptr, nullptr, nullptr);
+}
+
 // ---- Mouse hook callback (called from the hook thread) ----
 
 // Data for marshalling the mouse hook callback to the main thread.
@@ -107,6 +116,12 @@ typedef struct {
   int dx;
   int dy;
 } GestureCallbackData;
+
+typedef struct {
+  SkiffNativePlugin* self;
+  int x;
+  int y;
+} RightHoldCallbackData;
 
 static gboolean gesture_callback_idle(gpointer data) {
   GestureCallbackData* gd = (GestureCallbackData*)data;
@@ -123,6 +138,22 @@ static void on_mouse_gesture(int dx, int dy, gpointer user_data) {
   gd->dx = dx;
   gd->dy = dy;
   g_idle_add(gesture_callback_idle, gd);
+}
+
+static gboolean right_hold_callback_idle(gpointer data) {
+  RightHoldCallbackData* rd = (RightHoldCallbackData*)data;
+  send_right_button_hold_to_dart(rd->self, rd->x, rd->y);
+  g_free(rd);
+  return FALSE;  // Remove from idle
+}
+
+static void on_right_button_hold(int x, int y, gpointer user_data) {
+  SkiffNativePlugin* self = SKIFF_NATIVE_PLUGIN(user_data);
+  RightHoldCallbackData* rd = g_new0(RightHoldCallbackData, 1);
+  rd->self = self;
+  rd->x = x;
+  rd->y = y;
+  g_idle_add(right_hold_callback_idle, rd);
 }
 
 // ---- Tray callback ----
@@ -178,7 +209,9 @@ static FlMethodResponse* handle_initialize(SkiffNativePlugin* self) {
 
   // Install the mouse hook for middle-click gestures.
   if (!self->mouse_hook) {
-    self->mouse_hook = mouse_hook_new(on_mouse_gesture, self);
+    self->mouse_hook = mouse_hook_new(on_mouse_gesture,
+                                      on_right_button_hold,
+                                      self);
     if (self->mouse_hook) {
       mouse_hook_set_enabled(self->mouse_hook, self->gesture_enabled);
     }

@@ -32,6 +32,7 @@ class SkiffNativePlugin {
   // Invoke Dart callbacks on the MethodChannel.
   void InvokeOverlayTap(const std::string& zone);
   void InvokeMiddleClickGesture(const std::string& direction);
+  void InvokeRightButtonHold(int x, int y);
   void InvokeTrayAction(const std::string& action);
 
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;

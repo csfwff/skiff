@@ -127,6 +127,9 @@ void SkiffNativePlugin::Initialize() {
   mouse_hook_.setGestureCallback([this](const std::string& direction) {
     InvokeMiddleClickGesture(direction);
   });
+  mouse_hook_.setRightHoldCallback([this](int x, int y) {
+    InvokeRightButtonHold(x, y);
+  });
   mouse_hook_.start();
 }
 
@@ -141,6 +144,16 @@ void SkiffNativePlugin::InvokeMiddleClickGesture(const std::string& direction) {
   flutter::EncodableMap args;
   args[flutter::EncodableValue("direction")] = flutter::EncodableValue(direction);
   channel_->InvokeMethod("onMiddleClickGesture",
+                         std::make_unique<flutter::EncodableValue>(args));
+}
+
+void SkiffNativePlugin::InvokeRightButtonHold(int x, int y) {
+  flutter::EncodableMap args;
+  args[flutter::EncodableValue("x")] =
+      flutter::EncodableValue(static_cast<int64_t>(x));
+  args[flutter::EncodableValue("y")] =
+      flutter::EncodableValue(static_cast<int64_t>(y));
+  channel_->InvokeMethod("onRightButtonHold",
                          std::make_unique<flutter::EncodableValue>(args));
 }
 

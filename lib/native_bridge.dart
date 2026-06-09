@@ -8,6 +8,7 @@ class NativeBridge {
   // 回调函数 - 由 main.dart 设置
   Function(String zone)? onOverlayTap;
   Function(String direction)? onMiddleClickGesture;
+  Function(double x, double y)? onRightButtonHold;
   Function(String action)? onTrayAction;
 
   /// 初始化原生平台，注册回调
@@ -29,6 +30,10 @@ class NativeBridge {
       case 'onMiddleClickGesture':
         final direction = call.arguments['direction'] as String;
         onMiddleClickGesture?.call(direction);
+      case 'onRightButtonHold':
+        final x = (call.arguments['x'] as num).toDouble();
+        final y = (call.arguments['y'] as num).toDouble();
+        onRightButtonHold?.call(x, y);
       case 'onTrayAction':
         final action = call.arguments['action'] as String;
         onTrayAction?.call(action);

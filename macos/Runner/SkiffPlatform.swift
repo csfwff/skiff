@@ -47,13 +47,9 @@ class SkiffPlatform: NSObject, FlutterPlugin {
                                     details: nil))
                 return
             }
-            if enabled {
-                mouseHook.start(onGesture: { [weak self] direction in
-                    self?.channel.invokeMethod("onMiddleClickGesture",
-                                               arguments: ["direction": direction])
-                })
-            } else {
-                mouseHook.stop()
+            if AccessibilityHelper.checkPermission() {
+                startMouseHook()
+                mouseHook.setEnabled(enabled)
             }
             trayManager.updateGestureState(enabled: enabled)
             result(nil)
@@ -106,13 +102,26 @@ class SkiffPlatform: NSObject, FlutterPlugin {
         let granted = AccessibilityHelper.checkPermission()
 
         if granted {
-            // Install mouse hook
-            mouseHook.start(onGesture: { [weak self] direction in
-                self?.channel.invokeMethod("onMiddleClickGesture",
-                                           arguments: ["direction": direction])
-            })
+            startMouseHook()
         }
 
         result(["accessibilityGranted": granted])
+    }
+
+    private func startMouseHook() {
+        mouseHook.start(
+            onGesture: { [weak self] direction in
+                self?.channel.invokeMethod(
+                    "onMiddleClickGesture",
+                    arguments: ["direction": direction]
+                )
+            },
+            onRightHold: { [weak self] point in
+                self?.channel.invokeMethod(
+                    "onRightButtonHold",
+                    arguments: ["x": Double(point.x), "y": Double(point.y)]
+                )
+            }
+        )
     }
 }

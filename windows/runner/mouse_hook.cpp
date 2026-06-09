@@ -7,6 +7,8 @@
 namespace {
 constexpr UINT WM_SKIFF_MOUSE = WM_APP + 100;
 constexpr int kGestureThreshold = 20;  // pixels
+constexpr UINT_PTR kRightHoldTimerId = 1;
+constexpr UINT kRightHoldTimeoutMs = 2000;
 constexpr wchar_t kHelperClassName[] = L"SkiffMouseHookHelper";
 }  // namespace
 
@@ -65,12 +67,15 @@ void MouseHook::stop() {
     hook_ = nullptr;
   }
   if (helper_hwnd_) {
+    KillTimer(helper_hwnd_, kRightHoldTimerId);
     DestroyWindow(helper_hwnd_);
     helper_hwnd_ = nullptr;
   }
   instance_ = nullptr;
   state_ = State::IDLE;
   triggered_ = false;
+  right_pressed_ = false;
+  right_hold_triggered_ = false;
 }
 
 void MouseHook::setEnabled(bool enabled) {
@@ -90,20 +95,37 @@ LRESULT CALLBACK MouseHook::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     return 0;
   }
+  if (msg == WM_TIMER && wp == kRightHoldTimerId) {
+    MouseHook* self = reinterpret_cast<MouseHook*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+    if (self) {
+      self->handleRightHoldTimer();
+    }
+    return 0;
+  }
   return DefWindowProc(hwnd, msg, wp, lp);
 }
 
 LRESULT CALLBACK MouseHook::HookProc(int nCode, WPARAM wParam, LPARAM lParam) {
-  if (nCode >= 0 && instance_ && instance_->enabled_) {
+  if (nCode >= 0 && instance_ && instance_->helper_hwnd_) {
     auto* ms = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
     LPARAM packed = MAKELPARAM(ms->pt.x, ms->pt.y);
 
     switch (wParam) {
+      case WM_RBUTTONDOWN:
+      case WM_RBUTTONUP:
+        PostMessage(instance_->helper_hwnd_, WM_SKIFF_MOUSE, wParam, packed);
+        break;
       case WM_MBUTTONDOWN:
       case WM_MBUTTONUP:
+        if (instance_->enabled_) {
+          PostMessage(instance_->helper_hwnd_, WM_SKIFF_MOUSE, wParam, packed);
+        }
+        break;
       case WM_MOUSEMOVE:
         // Post to the helper window for async processing.
-        PostMessage(instance_->helper_hwnd_, WM_SKIFF_MOUSE, wParam, packed);
+        if (instance_->enabled_ || instance_->right_pressed_) {
+          PostMessage(instance_->helper_hwnd_, WM_SKIFF_MOUSE, wParam, packed);
+        }
         break;
     }
   }
@@ -113,6 +135,29 @@ LRESULT CALLBACK MouseHook::HookProc(int nCode, WPARAM wParam, LPARAM lParam) {
 void MouseHook::handleMouseMessage(WPARAM wParam, LPARAM lParam) {
   int x = GET_X_LPARAM(lParam);
   int y = GET_Y_LPARAM(lParam);
+
+  if (wParam == WM_RBUTTONDOWN) {
+    right_pressed_ = true;
+    right_hold_triggered_ = false;
+    right_x_ = x;
+    right_y_ = y;
+    if (helper_hwnd_) {
+      SetTimer(helper_hwnd_, kRightHoldTimerId, kRightHoldTimeoutMs, nullptr);
+    }
+  } else if (wParam == WM_MOUSEMOVE && right_pressed_) {
+    right_x_ = x;
+    right_y_ = y;
+  } else if (wParam == WM_RBUTTONUP) {
+    if (helper_hwnd_) {
+      KillTimer(helper_hwnd_, kRightHoldTimerId);
+    }
+    right_pressed_ = false;
+    right_hold_triggered_ = false;
+  }
+
+  if (!enabled_) {
+    return;
+  }
 
   switch (state_) {
     case State::IDLE:
@@ -148,6 +193,21 @@ void MouseHook::handleMouseMessage(WPARAM wParam, LPARAM lParam) {
         triggered_ = false;
       }
       break;
+  }
+}
+
+void MouseHook::handleRightHoldTimer() {
+  if (helper_hwnd_) {
+    KillTimer(helper_hwnd_, kRightHoldTimerId);
+  }
+
+  if (!right_pressed_ || right_hold_triggered_) {
+    return;
+  }
+
+  right_hold_triggered_ = true;
+  if (right_hold_callback_) {
+    right_hold_callback_(right_x_, right_y_);
   }
 }
 

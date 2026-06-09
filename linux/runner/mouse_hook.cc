@@ -6,6 +6,7 @@
 #include <X11/Xlib.h>
 
 static const int GESTURE_THRESHOLD = 20;
+static const gint64 RIGHT_HOLD_THRESHOLD_US = 2 * G_USEC_PER_SEC;
 
 typedef enum {
   HOOK_STATE_IDLE,
@@ -17,13 +18,18 @@ struct _MouseHook {
   volatile gboolean running;
   volatile gboolean enabled;
 
-  MouseHookGestureCallback callback;
+  MouseHookGestureCallback gesture_callback;
+  MouseHookRightHoldCallback right_hold_callback;
   gpointer user_data;
 
   HookState state;
   int press_x;
   int press_y;
   gboolean triggered;
+
+  gboolean right_pressed;
+  gboolean right_hold_triggered;
+  gint64 right_press_time_us;
 };
 
 static bool is_x11() {
@@ -46,20 +52,43 @@ static gpointer mouse_hook_thread(gpointer data) {
     // 每 10ms 轮询一次鼠标状态
     g_usleep(10 * 1000);  // 10ms
 
-    if (!hook->enabled) {
-      if (hook->state != HOOK_STATE_IDLE) {
-        hook->state = HOOK_STATE_IDLE;
-        hook->triggered = FALSE;
-      }
-      continue;
-    }
-
     Window root_ret, child_ret;
     int root_x, root_y, win_x, win_y;
     unsigned int mask;
 
     if (!XQueryPointer(display, DefaultRootWindow(display), &root_ret,
                        &child_ret, &root_x, &root_y, &win_x, &win_y, &mask)) {
+      continue;
+    }
+
+    bool right_pressed = (mask & Button3Mask) != 0;
+    if (right_pressed) {
+      if (!hook->right_pressed) {
+        hook->right_pressed = TRUE;
+        hook->right_hold_triggered = FALSE;
+        hook->right_press_time_us = g_get_monotonic_time();
+        g_message("mouse_hook: right button pressed at (%d, %d)",
+                  root_x, root_y);
+      } else if (!hook->right_hold_triggered &&
+                 g_get_monotonic_time() - hook->right_press_time_us >=
+                     RIGHT_HOLD_THRESHOLD_US) {
+        hook->right_hold_triggered = TRUE;
+        g_message("mouse_hook: right button hold detected at (%d, %d)",
+                  root_x, root_y);
+        if (hook->right_hold_callback) {
+          hook->right_hold_callback(root_x, root_y, hook->user_data);
+        }
+      }
+    } else if (hook->right_pressed) {
+      hook->right_pressed = FALSE;
+      hook->right_hold_triggered = FALSE;
+    }
+
+    if (!hook->enabled) {
+      if (hook->state != HOOK_STATE_IDLE) {
+        hook->state = HOOK_STATE_IDLE;
+        hook->triggered = FALSE;
+      }
       continue;
     }
 
@@ -92,8 +121,8 @@ static gpointer mouse_hook_thread(gpointer data) {
             if (scroll_dx != 0 || scroll_dy != 0) {
               g_message("mouse_hook: gesture detected dx=%d dy=%d",
                         scroll_dx, scroll_dy);
-              if (hook->callback) {
-                hook->callback(scroll_dx, scroll_dy, hook->user_data);
+              if (hook->gesture_callback) {
+                hook->gesture_callback(scroll_dx, scroll_dy, hook->user_data);
               }
             }
           } else {
@@ -120,15 +149,17 @@ static gpointer mouse_hook_thread(gpointer data) {
   return nullptr;
 }
 
-MouseHook* mouse_hook_new(MouseHookGestureCallback callback,
-                           gpointer user_data) {
+MouseHook* mouse_hook_new(MouseHookGestureCallback gesture_callback,
+                          MouseHookRightHoldCallback right_hold_callback,
+                          gpointer user_data) {
   if (!is_x11()) {
     g_warning("mouse_hook: not running on X11, disabled");
     return nullptr;
   }
 
   MouseHook* hook = g_new0(MouseHook, 1);
-  hook->callback = callback;
+  hook->gesture_callback = gesture_callback;
+  hook->right_hold_callback = right_hold_callback;
   hook->user_data = user_data;
   hook->running = TRUE;
   hook->enabled = TRUE;

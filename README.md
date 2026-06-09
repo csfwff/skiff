@@ -16,6 +16,7 @@
 | 悬浮滚动按钮 | 50×110px 三区域：▲向上滚动 / ≡拖拽手柄 / ▼向下滚动 |
 | 中键手势滚动 | 按住中键 → 移动 >20px → 松开 → 滚动（支持上下左右） |
 | 中键拖动反向 | 可反转中键手势滚动方向 |
+| 右键长按召回 | 右键按住 2 秒，将悬浮窗移动到鼠标当前位置 |
 | 系统托盘 | 右键菜单管理所有设置（见下方） |
 | 滚动行数 | 可调节每次滚动 1-10 行（默认 3 行） |
 | 开机自启 | 登录系统时自动启动（Linux: ~/.config/autostart/） |
@@ -206,6 +207,7 @@ while (running) {
 | `setAutoStart` | Dart→Native | 设置开机自启 |
 | `quit` | Dart→Native | 退出应用 |
 | `onMiddleClickGesture` | Native→Dart | 中键手势回调 |
+| `onRightButtonHold` | Native→Dart | 右键长按召回悬浮窗 |
 | `onTrayAction` | Native→Dart | 托盘菜单回调 |
 
 Dart 层通过 `MissingPluginException` 捕获实现优雅降级。

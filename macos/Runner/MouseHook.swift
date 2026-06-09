@@ -4,7 +4,8 @@ import CoreGraphics
 class MouseHook {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var isEnabled: Bool = false
+    private var isInstalled: Bool = false
+    private var middleGestureEnabled: Bool = true
 
     // State machine
     enum State {
@@ -15,14 +16,26 @@ class MouseHook {
     private var state: State = .idle
     private var pressPosition: CGPoint = .zero
     private var triggered: Bool = false
-    private var callback: ((String) -> Void)?
+    private var gestureCallback: ((String) -> Void)?
+    private var rightHoldCallback: ((CGPoint) -> Void)?
+    private var rightHoldWorkItem: DispatchWorkItem?
+    private var rightHoldPosition: CGPoint = .zero
 
-    func start(onGesture: @escaping (String) -> Void) {
-        self.callback = onGesture
+    func start(onGesture: @escaping (String) -> Void,
+               onRightHold: @escaping (CGPoint) -> Void) {
+        self.gestureCallback = onGesture
+        self.rightHoldCallback = onRightHold
+
+        if eventTap != nil {
+            return
+        }
 
         let eventMask: CGEventMask = (1 << CGEventType.otherMouseDown.rawValue)
             | (1 << CGEventType.otherMouseUp.rawValue)
             | (1 << CGEventType.otherMouseDragged.rawValue)
+            | (1 << CGEventType.rightMouseDown.rawValue)
+            | (1 << CGEventType.rightMouseUp.rawValue)
+            | (1 << CGEventType.rightMouseDragged.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cghidEventTap,
@@ -40,7 +53,7 @@ class MouseHook {
         self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
-        self.isEnabled = true
+        self.isInstalled = true
         print("[MouseHook] Event tap installed successfully.")
     }
 
@@ -53,19 +66,23 @@ class MouseHook {
         }
         eventTap = nil
         runLoopSource = nil
-        isEnabled = false
+        isInstalled = false
         state = .idle
         triggered = false
+        rightHoldWorkItem?.cancel()
+        rightHoldWorkItem = nil
+        rightHoldPosition = .zero
     }
 
     func setEnabled(_ enabled: Bool) {
-        if enabled && !isEnabled {
-            // Re-start if we have a callback
-            if let cb = callback {
-                start(onGesture: cb)
-            }
-        } else if !enabled && isEnabled {
-            stop()
+        middleGestureEnabled = enabled
+        if enabled && !isInstalled,
+           let gestureCallback = gestureCallback,
+           let rightHoldCallback = rightHoldCallback {
+            start(onGesture: gestureCallback, onRightHold: rightHoldCallback)
+        } else if !enabled {
+            state = .idle
+            triggered = false
         }
     }
 
@@ -78,9 +95,39 @@ class MouseHook {
             return Unmanaged.passUnretained(event)
         }
 
-        let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
+        switch type {
+        case .rightMouseDown:
+            rightHoldWorkItem?.cancel()
+            rightHoldPosition = event.location
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self else {
+                    return
+                }
+                self.rightHoldCallback?(self.rightHoldPosition)
+            }
+            rightHoldWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
+            return Unmanaged.passUnretained(event)
+
+        case .rightMouseDragged:
+            rightHoldPosition = event.location
+            return Unmanaged.passUnretained(event)
+
+        case .rightMouseUp:
+            rightHoldWorkItem?.cancel()
+            rightHoldWorkItem = nil
+            return Unmanaged.passUnretained(event)
+
+        default:
+            break
+        }
+
+        if !middleGestureEnabled {
+            return Unmanaged.passUnretained(event)
+        }
 
         // Only handle middle button (button number 2)
+        let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
         guard buttonNumber == 2 else {
             return Unmanaged.passUnretained(event)
         }
@@ -116,7 +163,7 @@ class MouseHook {
 
                     // Send to Dart on main thread
                     DispatchQueue.main.async { [weak self] in
-                        self?.callback?(direction)
+                        self?.gestureCallback?(direction)
                     }
 
                     state = .idle

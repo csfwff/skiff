@@ -101,6 +101,9 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
     // 注册原生回调
     widget.nativeBridge.onOverlayTap = _handleOverlayTap;
     widget.nativeBridge.onMiddleClickGesture = _handleMiddleClickGesture;
+    widget.nativeBridge.onRightButtonHold = (x, y) {
+      unawaited(_handleRightButtonHold(x, y));
+    };
     widget.nativeBridge.onTrayAction = _handleTrayAction;
 
     // 按当前设置恢复悬浮窗状态
@@ -305,6 +308,19 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
     }
   }
 
+  /// 右键按住 2 秒后，将悬浮窗召回到鼠标当前位置。
+  Future<void> _handleRightButtonHold(double x, double y) async {
+    try {
+      final targetPosition = Offset(
+        x - _overlayWindowSize.width / 2,
+        y - _overlayWindowSize.height / 2,
+      );
+      await _moveOverlayWindowTo(targetPosition);
+    } catch (e, stackTrace) {
+      debugPrint('右键长按移动悬浮窗失败: $e\n$stackTrace');
+    }
+  }
+
   Future<void> _restoreOverlayWindowState() async {
     try {
       if (_settings.buttonVisible) {
@@ -332,6 +348,36 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
       await windowManager.show();
     } finally {
       _suspendOverlayPositionSaving = false;
+    }
+  }
+
+  Future<void> _moveOverlayWindowTo(Offset position) async {
+    _suspendOverlayPositionSaving = true;
+    try {
+      final normalizedPosition = await _normalizeOverlayPosition(position);
+      await widget.nativeBridge.setOverlayMode(true);
+      await windowManager.setTitle('Skiff');
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setSkipTaskbar(true);
+      await windowManager.setMinimumSize(_overlayWindowSize);
+      await windowManager.setMaximumSize(_overlayWindowSize);
+      await windowManager.setSize(_overlayWindowSize);
+      await windowManager.setPosition(normalizedPosition);
+      await widget.nativeBridge.setOverlayVisible(true);
+      await windowManager.show();
+
+      _settings = _settings.copyWith(
+        buttonVisible: true,
+        buttonX: normalizedPosition.dx,
+        buttonY: normalizedPosition.dy,
+      );
+      await SettingsService.save(_settings);
+    } finally {
+      _suspendOverlayPositionSaving = false;
+    }
+
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -438,7 +484,7 @@ class _SkiffAppState extends State<SkiffApp> with WindowListener {
         builder: (ctx) => AlertDialog(
           title: const Text('需要辅助功能权限'),
           content: const Text(
-            'Skiff 需要辅助功能权限才能监听鼠标中键手势。\n\n'
+            'Skiff 需要辅助功能权限才能监听鼠标中键手势和右键长按召回。\n\n'
             '请在系统设置中授予 Skiff 辅助功能权限，'
             '然后重启应用。',
           ),
