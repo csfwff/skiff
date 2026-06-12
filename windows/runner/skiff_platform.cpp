@@ -128,6 +128,25 @@ void SetOverlayClickThrough(HWND overlay, bool transparent) {
     ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
   }
 }
+// Describes a window for logging: "class#pid(self?)". Lets us tell at a glance
+// whether a handle is our own Flutter view or the target application.
+std::string DescribeWindow(HWND hwnd) {
+  if (!hwnd) {
+    return "null";
+  }
+  wchar_t cls[128] = {0};
+  ::GetClassNameW(hwnd, cls, 128);
+  char cls_utf8[256] = {0};
+  ::WideCharToMultiByte(CP_UTF8, 0, cls, -1, cls_utf8, sizeof(cls_utf8), nullptr,
+                        nullptr);
+  DWORD pid = 0;
+  ::GetWindowThreadProcessId(hwnd, &pid);
+  bool is_self = (pid == ::GetCurrentProcessId());
+  char buf[320];
+  std::snprintf(buf, sizeof(buf), "%s#%lu%s", cls_utf8, pid,
+                is_self ? "(SELF)" : "");
+  return std::string(buf);
+}
 }  // namespace
 
 // static
@@ -267,9 +286,14 @@ void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
   SetOverlayClickThrough(overlay, true);
 
   HWND after = ::WindowFromPoint(cursor);
-  NativeLog("SimulateScrollDirect dx=%d dy=%d cursor=(%ld,%ld) overlay=%p "
-            "under_before=%p under_after=%p",
-            dx, dy, cursor.x, cursor.y, overlay, before, after);
+  HWND overlay_child = ::FindWindowExW(overlay, nullptr, nullptr, nullptr);
+  NativeLog("SimulateScrollDirect dx=%d dy=%d cursor=(%ld,%ld)", dx, dy,
+            cursor.x, cursor.y);
+  NativeLog("  overlay=%s", DescribeWindow(overlay).c_str());
+  NativeLog("  overlay_child=%s", DescribeWindow(overlay_child).c_str());
+  NativeLog("  under_before=%s", DescribeWindow(before).c_str());
+  NativeLog("  under_after=%s", DescribeWindow(after).c_str());
+  NativeLog("  foreground=%s", DescribeWindow(::GetForegroundWindow()).c_str());
 
   // Inject a real system wheel event -- the same SendInput path the middle-click
   // gesture uses, which is confirmed working. A direct SendMessage(WM_MOUSEWHEEL)
