@@ -1,13 +1,47 @@
 #include "skiff_platform.h"
 
 #include <windows.h>
+#include <shlobj.h>
 
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <variant>
 
 namespace {
 constexpr char kChannelName[] = "com.skiff/native";
 std::unique_ptr<SkiffNativePlugin> g_plugin;
+
+// Appends a line to %APPDATA%\Skiff\native.log. Release builds have no console,
+// so this file is the only way to inspect what the native layer is doing.
+// Best-effort: any failure is silently ignored.
+void NativeLog(const char* fmt, ...) {
+  wchar_t* appdata = nullptr;
+  if (::SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &appdata) !=
+      S_OK) {
+    return;
+  }
+  std::wstring path = std::wstring(appdata) + L"\\Skiff\\native.log";
+  ::CoTaskMemFree(appdata);
+
+  FILE* f = nullptr;
+  if (_wfopen_s(&f, path.c_str(), L"a") != 0 || !f) {
+    return;
+  }
+
+  SYSTEMTIME st;
+  ::GetLocalTime(&st);
+  std::fprintf(f, "[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond,
+               st.wMilliseconds);
+
+  va_list args;
+  va_start(args, fmt);
+  std::vfprintf(f, fmt, args);
+  va_end(args);
+
+  std::fprintf(f, "\n");
+  std::fclose(f);
+}
 
 // Extracts an integer argument from an EncodableMap.
 //
@@ -66,6 +100,33 @@ HWND FindOverlayWindow() {
     }
   }
   return nullptr;
+}
+
+// Toggles WS_EX_TRANSPARENT on the overlay top-level window AND its Flutter
+// child view. This is the crux of the click-through fix: Flutter renders into a
+// child HWND (class "FLUTTERVIEW") that fills the client area, and hit-testing
+// resolves to that child -- not the parent. Making only the parent transparent
+// leaves the child opaque, so the injected wheel still lands on the overlay.
+// Both windows must be transparent for the cursor's hit-test to fall through to
+// the application beneath.
+void SetOverlayClickThrough(HWND overlay, bool transparent) {
+  if (!overlay) {
+    return;
+  }
+  HWND windows[2] = {overlay, ::FindWindowExW(overlay, nullptr, nullptr,
+                                              nullptr)};
+  for (HWND hwnd : windows) {
+    if (!hwnd) {
+      continue;
+    }
+    LONG_PTR ex = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    if (transparent) {
+      ex |= WS_EX_TRANSPARENT;
+    } else {
+      ex &= ~WS_EX_TRANSPARENT;
+    }
+    ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+  }
 }
 }  // namespace
 
@@ -190,41 +251,37 @@ void SkiffNativePlugin::SetOverlayMode(bool enabled) {
     ex_style &= ~WS_EX_NOACTIVATE;
   }
   ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+  NativeLog("SetOverlayMode enabled=%d overlay=%p", enabled ? 1 : 0, hwnd);
 }
 
 void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
   HWND overlay = FindOverlayWindow();
 
-  // Make the overlay click-through for the duration of the injection. With
-  // WS_EX_TRANSPARENT set, the cursor's hit-test skips the overlay and resolves
-  // to the window beneath it, so the injected wheel is routed there by Windows'
-  // "scroll the window under the pointer" behaviour. Combined with the overlay
-  // never holding focus (WS_EX_NOACTIVATE), this also covers the focus-routed
-  // case when that setting is disabled.
-  LONG_PTR original_ex_style = 0;
-  bool toggled = false;
-  if (overlay) {
-    original_ex_style = ::GetWindowLongPtrW(overlay, GWL_EXSTYLE);
-    if ((original_ex_style & WS_EX_TRANSPARENT) == 0) {
-      ::SetWindowLongPtrW(overlay, GWL_EXSTYLE,
-                          original_ex_style | WS_EX_TRANSPARENT);
-      toggled = true;
-    }
-  }
+  POINT cursor;
+  ::GetCursorPos(&cursor);
+  HWND before = ::WindowFromPoint(cursor);
+
+  // Make the overlay (and its Flutter child) click-through so the cursor's
+  // hit-test falls through to the window beneath it. Windows then routes the
+  // injected wheel to that window ("scroll the window under the pointer").
+  SetOverlayClickThrough(overlay, true);
+
+  HWND after = ::WindowFromPoint(cursor);
+  NativeLog("SimulateScrollDirect dx=%d dy=%d cursor=(%ld,%ld) overlay=%p "
+            "under_before=%p under_after=%p",
+            dx, dy, cursor.x, cursor.y, overlay, before, after);
 
   // Inject a real system wheel event -- the same SendInput path the middle-click
-  // gesture uses, which is known to work. A direct SendMessage(WM_MOUSEWHEEL)
+  // gesture uses, which is confirmed working. A direct SendMessage(WM_MOUSEWHEEL)
   // is unreliable: many apps (Chromium, WPF, UWP) ignore synthesised wheel
   // messages that don't come through the system input queue.
   scroll_simulator_.scroll(dx, dy);
 
-  if (toggled) {
-    // The injected event is dispatched asynchronously; give the input thread a
-    // moment to hit-test and deliver it before the overlay becomes opaque
-    // again, otherwise the hit-test could re-capture the wheel on the overlay.
-    ::Sleep(15);
-    ::SetWindowLongPtrW(overlay, GWL_EXSTYLE, original_ex_style);
-  }
+  // The injected event is dispatched asynchronously; let the input thread
+  // hit-test and deliver it before the overlay becomes opaque again, otherwise
+  // the hit-test could re-capture the wheel on the overlay.
+  ::Sleep(20);
+  SetOverlayClickThrough(overlay, false);
 }
 
 void SkiffNativePlugin::InvokeOverlayTap(const std::string& zone) {
