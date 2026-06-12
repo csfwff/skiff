@@ -102,32 +102,31 @@ HWND FindOverlayWindow() {
   return nullptr;
 }
 
-// Toggles WS_EX_TRANSPARENT on the overlay top-level window AND its Flutter
-// child view. This is the crux of the click-through fix: Flutter renders into a
-// child HWND (class "FLUTTERVIEW") that fills the client area, and hit-testing
-// resolves to that child -- not the parent. Making only the parent transparent
-// leaves the child opaque, so the injected wheel still lands on the overlay.
-// Both windows must be transparent for the cursor's hit-test to fall through to
-// the application beneath.
-void SetOverlayClickThrough(HWND overlay, bool transparent) {
+// Makes the overlay click-through (or restores it). The cursor's hit-test for
+// real mouse input passes through to the window beneath ONLY when the window is
+// both WS_EX_LAYERED and WS_EX_TRANSPARENT -- WS_EX_TRANSPARENT alone is not
+// enough. This is the Win32 equivalent of X11's empty input shape used on
+// Linux. We toggle it on the top-level overlay window; mouse input to its
+// Flutter child passes through as well.
+//
+// NOTE: WindowFromPoint() does NOT honour these styles (it returns the window
+// under the point regardless of transparency), so it cannot be used to verify
+// the effect -- only an actual injected wheel will route correctly.
+void SetOverlayClickThrough(HWND overlay, bool through) {
   if (!overlay) {
     return;
   }
-  HWND windows[2] = {overlay, ::FindWindowExW(overlay, nullptr, nullptr,
-                                              nullptr)};
-  for (HWND hwnd : windows) {
-    if (!hwnd) {
-      continue;
-    }
-    LONG_PTR ex = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    if (transparent) {
-      ex |= WS_EX_TRANSPARENT;
-    } else {
-      ex &= ~WS_EX_TRANSPARENT;
-    }
-    ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+  LONG_PTR ex = ::GetWindowLongPtrW(overlay, GWL_EXSTYLE);
+  if (through) {
+    ex |= (WS_EX_LAYERED | WS_EX_TRANSPARENT);
+  } else {
+    // Keep WS_EX_LAYERED (Flutter's transparent window relies on it); only drop
+    // the click-through bit so the buttons become interactive again.
+    ex &= ~WS_EX_TRANSPARENT;
   }
+  ::SetWindowLongPtrW(overlay, GWL_EXSTYLE, ex);
 }
+
 // Describes a window for logging: "class#pid(self?)". Lets us tell at a glance
 // whether a handle is our own Flutter view or the target application.
 std::string DescribeWindow(HWND hwnd) {
@@ -274,36 +273,32 @@ void SkiffNativePlugin::SetOverlayMode(bool enabled) {
 }
 
 void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
+  // Scroll whatever window sits beneath the overlay (same behaviour as the
+  // Linux build). The overlay is at the cursor, so we make it click-through and
+  // inject a real wheel event at the current cursor position; Windows then
+  // routes the wheel to the window directly under the overlay.
   HWND overlay = FindOverlayWindow();
 
   POINT cursor;
   ::GetCursorPos(&cursor);
-  HWND before = ::WindowFromPoint(cursor);
+  HWND under = ::WindowFromPoint(cursor);  // logging only; ignores transparency
 
-  // Make the overlay (and its Flutter child) click-through so the cursor's
-  // hit-test falls through to the window beneath it. Windows then routes the
-  // injected wheel to that window ("scroll the window under the pointer").
+  // Enable click-through (WS_EX_LAYERED | WS_EX_TRANSPARENT) so the injected
+  // wheel hit-tests through to the window beneath the overlay.
   SetOverlayClickThrough(overlay, true);
 
-  HWND after = ::WindowFromPoint(cursor);
-  HWND overlay_child = ::FindWindowExW(overlay, nullptr, nullptr, nullptr);
-  NativeLog("SimulateScrollDirect dx=%d dy=%d cursor=(%ld,%ld)", dx, dy,
-            cursor.x, cursor.y);
-  NativeLog("  overlay=%s", DescribeWindow(overlay).c_str());
-  NativeLog("  overlay_child=%s", DescribeWindow(overlay_child).c_str());
-  NativeLog("  under_before=%s", DescribeWindow(before).c_str());
-  NativeLog("  under_after=%s", DescribeWindow(after).c_str());
-  NativeLog("  foreground=%s", DescribeWindow(::GetForegroundWindow()).c_str());
+  NativeLog("SimulateScrollDirect dx=%d dy=%d cursor=(%ld,%ld) overlay=%s "
+            "windowfrompoint=%s",
+            dx, dy, cursor.x, cursor.y, DescribeWindow(overlay).c_str(),
+            DescribeWindow(under).c_str());
 
-  // Inject a real system wheel event -- the same SendInput path the middle-click
-  // gesture uses, which is confirmed working. A direct SendMessage(WM_MOUSEWHEEL)
-  // is unreliable: many apps (Chromium, WPF, UWP) ignore synthesised wheel
-  // messages that don't come through the system input queue.
+  // Inject at the cursor position via SendInput (the path the middle-click
+  // gesture uses -- confirmed working). MOUSEEVENTF_ABSOLUTE is not needed; the
+  // wheel is delivered to the window under the current pointer position.
   scroll_simulator_.scroll(dx, dy);
 
-  // The injected event is dispatched asynchronously; let the input thread
-  // hit-test and deliver it before the overlay becomes opaque again, otherwise
-  // the hit-test could re-capture the wheel on the overlay.
+  // Let the input thread hit-test and deliver before we become opaque again,
+  // otherwise the restored overlay could swallow the in-flight event.
   ::Sleep(20);
   SetOverlayClickThrough(overlay, false);
 }
