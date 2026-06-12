@@ -29,6 +29,18 @@ class SkiffNativePlugin {
   // Initialize native subsystems (tray icon, mouse hook).
   void Initialize();
 
+  // Toggles overlay mode on the Flutter top-level window. In overlay mode the
+  // window is given WS_EX_NOACTIVATE so clicking the scroll button never steals
+  // focus from the target application (WM_MOUSEWHEEL is routed to the focused
+  // window, so the target must keep focus).
+  void SetOverlayMode(bool enabled);
+
+  // Injects a wheel event while the overlay window is temporarily made
+  // click-through (WS_EX_TRANSPARENT), so the wheel lands on the window beneath
+  // the cursor instead of the overlay itself. This covers the "scroll inactive
+  // window under pointer" routing mode.
+  void SimulateScrollDirect(int dx, int dy);
+
   // Invoke Dart callbacks on the MethodChannel.
   void InvokeOverlayTap(const std::string& zone);
   void InvokeMiddleClickGesture(const std::string& direction);

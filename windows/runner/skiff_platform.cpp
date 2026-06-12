@@ -50,6 +50,23 @@ bool GetBoolArg(const flutter::EncodableMap* args, const char* key,
   }
   return fallback;
 }
+
+// Returns the Flutter top-level window for this process. The overlay window is
+// created with the class name "FLUTTER_RUNNER_WIN32_WINDOW" (see
+// win32_window.cpp). We restrict the search to this process so we never touch a
+// window owned by another Flutter app.
+HWND FindOverlayWindow() {
+  HWND hwnd = nullptr;
+  while ((hwnd = ::FindWindowExW(nullptr, hwnd, L"FLUTTER_RUNNER_WIN32_WINDOW",
+                                 nullptr)) != nullptr) {
+    DWORD pid = 0;
+    ::GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == ::GetCurrentProcessId()) {
+      return hwnd;
+    }
+  }
+  return nullptr;
+}
 }  // namespace
 
 // static
@@ -109,6 +126,17 @@ void SkiffNativePlugin::HandleMethodCall(
     int lines = GetIntArg(args, "lines", 3);
     tray_manager_.setScrollLines(lines);
     result->Success();
+  } else if (method == "simulateScrollDirect") {
+    const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+    int dx = GetIntArg(args, "dx", 0);
+    int dy = GetIntArg(args, "dy", 0);
+    SimulateScrollDirect(dx, dy);
+    result->Success();
+  } else if (method == "setOverlayMode") {
+    const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+    bool enabled = GetBoolArg(args, "enabled", false);
+    SetOverlayMode(enabled);
+    result->Success();
   } else if (method == "setOverlayVisible") {
     // The overlay visibility is managed by Dart (window_manager package).
     // Nothing to do on the native side -- Dart owns the overlay window.
@@ -145,6 +173,79 @@ void SkiffNativePlugin::Initialize() {
     InvokeRightButtonHold(x, y);
   });
   mouse_hook_.start();
+}
+
+void SkiffNativePlugin::SetOverlayMode(bool enabled) {
+  HWND hwnd = FindOverlayWindow();
+  if (!hwnd) {
+    return;
+  }
+
+  LONG_PTR ex_style = ::GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+  if (enabled) {
+    // WS_EX_NOACTIVATE: clicking the overlay never activates it, so the target
+    // application keeps keyboard focus and WM_MOUSEWHEEL keeps flowing to it.
+    ex_style |= WS_EX_NOACTIVATE;
+  } else {
+    ex_style &= ~WS_EX_NOACTIVATE;
+  }
+  ::SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style);
+}
+
+void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
+  HWND overlay = FindOverlayWindow();
+
+  // Temporarily make the overlay click-through so WindowFromPoint skips it and
+  // returns the window directly beneath the cursor. WS_EX_TRANSPARENT windows
+  // are ignored by hit-testing, so this is reliable and synchronous.
+  LONG_PTR original_ex_style = 0;
+  bool toggled = false;
+  if (overlay) {
+    original_ex_style = ::GetWindowLongPtrW(overlay, GWL_EXSTYLE);
+    if ((original_ex_style & WS_EX_TRANSPARENT) == 0) {
+      ::SetWindowLongPtrW(overlay, GWL_EXSTYLE,
+                          original_ex_style | WS_EX_TRANSPARENT);
+      toggled = true;
+    }
+  }
+
+  POINT cursor;
+  ::GetCursorPos(&cursor);
+  HWND target = ::WindowFromPoint(cursor);
+
+  // Restore the overlay's interactivity immediately; we already captured the
+  // target, so the buttons keep working for the next tap.
+  if (toggled) {
+    ::SetWindowLongPtrW(overlay, GWL_EXSTYLE, original_ex_style);
+  }
+
+  // Never deliver the wheel to our own overlay.
+  if (!target || target == overlay) {
+    // Fall back to the focus/hover routing of a plain injected wheel.
+    scroll_simulator_.scroll(dx, dy);
+    return;
+  }
+
+  // Resolve to the deepest child under the cursor so apps that handle the
+  // wheel on an inner scroll view receive it.
+  POINT client = cursor;
+  ::ScreenToClient(target, &client);
+  HWND child = ::RealChildWindowFromPoint(target, client);
+  if (child) {
+    target = child;
+  }
+
+  const LPARAM pos = MAKELPARAM(cursor.x, cursor.y);
+  if (dy != 0) {
+    // Match the injected-wheel convention in ScrollSimulator::scroll:
+    // positive delta == dy * WHEEL_DELTA.
+    const WPARAM wparam = MAKEWPARAM(0, dy * WHEEL_DELTA);
+    ::SendMessageW(target, WM_MOUSEWHEEL, wparam, pos);
+  }
+  if (dx != 0) {
+    const WPARAM wparam = MAKEWPARAM(0, dx * WHEEL_DELTA);
+    ::SendMessageW(target, WM_MOUSEHWHEEL, wparam, pos);
+  }
 }
 
 void SkiffNativePlugin::InvokeOverlayTap(const std::string& zone) {
