@@ -8,6 +8,48 @@
 namespace {
 constexpr char kChannelName[] = "com.skiff/native";
 std::unique_ptr<SkiffNativePlugin> g_plugin;
+
+// Extracts an integer argument from an EncodableMap.
+//
+// Flutter's StandardMessageCodec encodes a Dart int as a 32-bit value when it
+// fits in 32 bits and as a 64-bit value otherwise. On the C++ side this means
+// the EncodableValue may hold either an int32_t or an int64_t, so we must
+// accept both -- calling std::get<int64_t>() on an int32 payload throws
+// std::bad_variant_access and terminates the process.
+int GetIntArg(const flutter::EncodableMap* args, const char* key,
+              int fallback) {
+  if (!args) {
+    return fallback;
+  }
+  auto it = args->find(flutter::EncodableValue(key));
+  if (it == args->end()) {
+    return fallback;
+  }
+  if (const auto* v = std::get_if<int32_t>(&it->second)) {
+    return static_cast<int>(*v);
+  }
+  if (const auto* v = std::get_if<int64_t>(&it->second)) {
+    return static_cast<int>(*v);
+  }
+  return fallback;
+}
+
+// Extracts a boolean argument from an EncodableMap, tolerating a missing key
+// or an unexpected payload type instead of throwing.
+bool GetBoolArg(const flutter::EncodableMap* args, const char* key,
+                bool fallback) {
+  if (!args) {
+    return fallback;
+  }
+  auto it = args->find(flutter::EncodableValue(key));
+  if (it == args->end()) {
+    return fallback;
+  }
+  if (const auto* v = std::get_if<bool>(&it->second)) {
+    return *v;
+  }
+  return fallback;
+}
 }  // namespace
 
 // static
@@ -47,52 +89,24 @@ void SkiffNativePlugin::HandleMethodCall(
     result->Success();
   } else if (method == "simulateScroll") {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-    int dx = 0;
-    int dy = 0;
-    if (args) {
-      auto it = args->find(flutter::EncodableValue("dx"));
-      if (it != args->end()) {
-        dx = static_cast<int>(std::get<int64_t>(it->second));
-      }
-      it = args->find(flutter::EncodableValue("dy"));
-      if (it != args->end()) {
-        dy = static_cast<int>(std::get<int64_t>(it->second));
-      }
-    }
+    int dx = GetIntArg(args, "dx", 0);
+    int dy = GetIntArg(args, "dy", 0);
     scroll_simulator_.scroll(dx, dy);
     result->Success();
   } else if (method == "setMiddleClickEnabled") {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-    bool enabled = false;
-    if (args) {
-      auto it = args->find(flutter::EncodableValue("enabled"));
-      if (it != args->end()) {
-        enabled = std::get<bool>(it->second);
-      }
-    }
+    bool enabled = GetBoolArg(args, "enabled", false);
     mouse_hook_.setEnabled(enabled);
     tray_manager_.setGestureEnabled(enabled);
     result->Success();
   } else if (method == "setMiddleDragReversed") {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-    bool reversed = false;
-    if (args) {
-      auto it = args->find(flutter::EncodableValue("reversed"));
-      if (it != args->end()) {
-        reversed = std::get<bool>(it->second);
-      }
-    }
+    bool reversed = GetBoolArg(args, "reversed", false);
     tray_manager_.setMiddleDragReversed(reversed);
     result->Success();
   } else if (method == "setScrollLines") {
     const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
-    int lines = 3;
-    if (args) {
-      auto it = args->find(flutter::EncodableValue("lines"));
-      if (it != args->end()) {
-        lines = static_cast<int>(std::get<int64_t>(it->second));
-      }
-    }
+    int lines = GetIntArg(args, "lines", 3);
     tray_manager_.setScrollLines(lines);
     result->Success();
   } else if (method == "setOverlayVisible") {
