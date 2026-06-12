@@ -195,9 +195,12 @@ void SkiffNativePlugin::SetOverlayMode(bool enabled) {
 void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
   HWND overlay = FindOverlayWindow();
 
-  // Temporarily make the overlay click-through so WindowFromPoint skips it and
-  // returns the window directly beneath the cursor. WS_EX_TRANSPARENT windows
-  // are ignored by hit-testing, so this is reliable and synchronous.
+  // Make the overlay click-through for the duration of the injection. With
+  // WS_EX_TRANSPARENT set, the cursor's hit-test skips the overlay and resolves
+  // to the window beneath it, so the injected wheel is routed there by Windows'
+  // "scroll the window under the pointer" behaviour. Combined with the overlay
+  // never holding focus (WS_EX_NOACTIVATE), this also covers the focus-routed
+  // case when that setting is disabled.
   LONG_PTR original_ex_style = 0;
   bool toggled = false;
   if (overlay) {
@@ -209,42 +212,18 @@ void SkiffNativePlugin::SimulateScrollDirect(int dx, int dy) {
     }
   }
 
-  POINT cursor;
-  ::GetCursorPos(&cursor);
-  HWND target = ::WindowFromPoint(cursor);
+  // Inject a real system wheel event -- the same SendInput path the middle-click
+  // gesture uses, which is known to work. A direct SendMessage(WM_MOUSEWHEEL)
+  // is unreliable: many apps (Chromium, WPF, UWP) ignore synthesised wheel
+  // messages that don't come through the system input queue.
+  scroll_simulator_.scroll(dx, dy);
 
-  // Restore the overlay's interactivity immediately; we already captured the
-  // target, so the buttons keep working for the next tap.
   if (toggled) {
+    // The injected event is dispatched asynchronously; give the input thread a
+    // moment to hit-test and deliver it before the overlay becomes opaque
+    // again, otherwise the hit-test could re-capture the wheel on the overlay.
+    ::Sleep(15);
     ::SetWindowLongPtrW(overlay, GWL_EXSTYLE, original_ex_style);
-  }
-
-  // Never deliver the wheel to our own overlay.
-  if (!target || target == overlay) {
-    // Fall back to the focus/hover routing of a plain injected wheel.
-    scroll_simulator_.scroll(dx, dy);
-    return;
-  }
-
-  // Resolve to the deepest child under the cursor so apps that handle the
-  // wheel on an inner scroll view receive it.
-  POINT client = cursor;
-  ::ScreenToClient(target, &client);
-  HWND child = ::RealChildWindowFromPoint(target, client);
-  if (child) {
-    target = child;
-  }
-
-  const LPARAM pos = MAKELPARAM(cursor.x, cursor.y);
-  if (dy != 0) {
-    // Match the injected-wheel convention in ScrollSimulator::scroll:
-    // positive delta == dy * WHEEL_DELTA.
-    const WPARAM wparam = MAKEWPARAM(0, dy * WHEEL_DELTA);
-    ::SendMessageW(target, WM_MOUSEWHEEL, wparam, pos);
-  }
-  if (dx != 0) {
-    const WPARAM wparam = MAKEWPARAM(0, dx * WHEEL_DELTA);
-    ::SendMessageW(target, WM_MOUSEHWHEEL, wparam, pos);
   }
 }
 
