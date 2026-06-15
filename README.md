@@ -2,7 +2,7 @@
 
 鼠标滚轮坏了？用轻舟代替。
 
-轻舟是一个跨平台桌面工具，当鼠标滚轮失灵时，提供两种替代方式来滚动页面：
+轻舟是一个~~跨平台~~Linux桌面工具，当鼠标滚轮失灵时，提供两种替代方式来滚动页面：
 
 1. **悬浮按钮** — 屏幕上常驻一个半透明的滚动条，点击上下箭头即可滚动
 2. **中键手势** — 按住鼠标中键，移动鼠标后松开，触发一次滚动
@@ -21,7 +21,7 @@
 | 滚动行数 | 可调节每次滚动 1-10 行（默认 3 行） |
 | 开机自启 | 登录系统时自动启动（Linux: ~/.config/autostart/） |
 | 设置持久化 | 按钮位置、可见性、手势开关、反向拖动、滚动行数、开机自启自动保存 |
-| 跨平台 | 支持 Windows、macOS、Linux |
+| ~~跨平台~~ bug改不动，不跨平台了 | 仅支持Linux x11 ！~~支持 Windows、macOS、Linux~~ |
 
 ## 托盘菜单
 
@@ -78,7 +78,7 @@ flutter build linux --release
 build/linux/x64/release/bundle/skiff
 ```
 
-### macOS
+### macOS(需要自己修bug)
 
 ```bash
 # 安装依赖（需要 Xcode）
@@ -90,7 +90,7 @@ flutter build macos --release
 # 系统设置 → 隐私与安全性 → 辅助功能 → 添加 Skiff
 ```
 
-### Windows
+### Windows(需要自己修bug)
 
 ```bash
 # 需要 Visual Studio + C++ 桌面开发工作负载
